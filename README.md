@@ -1,44 +1,56 @@
 # Klimat
 
-**A compact, cross-platform air-conditioner controller that lives in the system tray.** Klimat is built with Tauri, Rust, React, and TypeScript. Its small popup keeps the essential controls close at hand: power, room temperature, target temperature, operating mode, and fan speed.
+Klimat is a compact air-conditioner controller for Linux, macOS, and Windows. It lives in the system tray and opens a small popup for the controls used most often: power, room temperature, target temperature, operating mode, and fan speed.
 
-> Klimat is an early prototype. MELCloud, Midea-compatible, Daikin, and Gree adapters are implemented; control with physical units still needs validation.
+Klimat is an early prototype. The adapters and desktop packages build, but operation with physical air conditioners has not yet been validated across supported models.
 
-## Features
+## Supported connections
 
-- Tray-first popup for macOS, Windows, and Linux desktops.
-- Mitsubishi Electric devices through the MELCloud cloud service.
-- Midea and compatible devices over the local network, with broadcast discovery or a manually supplied IP address.
-- Gree devices over the local network, with automatic discovery and pairing.
-- Daikin units with compatible local Wi-Fi adapters, including common BRP069 models.
-- Up to six AC units, with a compact manufacturer picker and a distinct generated SVG icon for each provider.
-- Remove saved devices; shared connection credentials stay in the system keychain until the last device using that profile is removed.
-- Native app icons for each platform: Linux `.desktop` entries use a scalable hicolor SVG (`se.klimakontroll.desktop`), macOS bundles use `icon.icns`, and Windows installers use `icon.ico`. The tray icon is a separate compact asset so it stays legible in the panel/menu bar.
-- Power, temperature setpoint, cool/heat/auto/dry/fan modes, and fan speed.
-- Refreshes the selected unit's live status while the popup is open and when it becomes visible again.
-- Credentials and device keys stored in the operating system keychain.
-- Interface translated into 20 languages, including Swedish. The system language is detected on first launch; the language selector can override it.
-- Home Assistant integration code is used as a protocol reference. Klimat does not connect to or require a Home Assistant server.
-
-## Support status
-
-| Connection | Status | Notes |
+| Provider | Connection | Status and limits |
 | --- | --- | --- |
-| Mitsubishi Electric MELCloud | Implemented, needs device validation | Uses a standalone MELCloud client library. |
-| Midea, compatible Comfee and Toshiba Lifestyle models | Implemented, needs device validation | Leave the IP address blank for local network discovery, or enter it directly. Device model and network setup affect compatibility. |
-| Daikin local | Implemented, needs device validation | Manual IP setup for compatible adapters exposing Daikin's local HTTP API. Cloud-only models and newer authenticated adapters are not covered. |
-| Gree local | Implemented, needs device validation | Discovers and pairs supported units over UDP on the local network. |
-| MELCloud Home, LG ThinQ, network IR | Planned | The adapter interface is intended to support additional providers. |
+| Mitsubishi Electric MELCloud | Cloud | MELCloud account login and supported climate controls. MELCloud Home is a separate service and is not supported yet. |
+| Midea and compatible Comfee/Toshiba Lifestyle units | Local network | Broadcast discovery or a manually entered IP address. Compatibility depends on the unit and Wi-Fi module. |
+| Gree | Local network | Automatic discovery and pairing for supported units. |
+| Daikin | Local network | Manual IP address for adapters exposing the compatible, older local HTTP API. Cloud-only and newer authenticated adapters are not covered. |
 
-The MELCloud adapter uses the upstream `python-melcloud` client. Local Midea control uses `midea-local`; Gree control uses the MIT-licensed `gree-climate` Rust crate; Daikin support uses its local HTTP API directly. These adapters run without a Home Assistant runtime or server.
+You can save up to six units. The popup offers power, target temperature, cool/heat/auto/dry/fan modes, and fan speed where the device supports them. It refreshes the selected unit while the popup is open and when it becomes visible again.
+
+MELCloud currently means the classic MELCloud service. If your unit is set up only in MELCloud Home, that connection will not work with this adapter. Do not share account credentials in bug reports. Check that the account can sign in to the matching official app or website before reporting a login issue.
+
+## Download
+
+The [Build desktop installers workflow](https://github.com/yeager/klimat/actions/workflows/build.yml?query=branch%3Amain) builds separate artifacts for:
+
+- `klimat-linux-x64`: Linux x64 `.deb` and `.rpm`
+- `klimat-macos-x64`: Intel Mac `.dmg`
+- `klimat-macos-arm64`: Apple Silicon `.dmg`
+- `klimat-windows-x64`: Windows x64 `.msi` and NSIS `.exe`
+
+Open a successful workflow run and download the artifact for your operating system and architecture. These are unsigned development builds; macOS packages are not notarized. Physical-device support and signed production releases remain to be verified.
 
 ## Tray behavior
 
-Klimat starts hidden and opens a small, borderless popup from its tray icon. Clicking outside or closing the popup hides it. KDE Plasma supports StatusNotifierItem tray icons. GNOME Shell generally needs the [AppIndicator and KStatusNotifierItem Support extension](https://extensions.gnome.org/extension/615/appindicator-support/). On Wayland, the compositor controls popup placement.
+Klimat starts hidden and opens a small popup from its tray icon. Clicking outside or closing the popup hides it. KDE Plasma provides StatusNotifierItem support. GNOME Shell generally needs the [AppIndicator and KStatusNotifierItem Support extension](https://extensions.gnome.org/extension/615/appindicator-support/). On Wayland, popup placement is controlled by the compositor.
 
-## Development setup
+## Privacy and security
 
-Install Node.js, pnpm, Rust, Python 3, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your operating system. Adapter packaging also requires the dependencies in `requirements-build.txt`.
+- MELCloud credentials and local device keys are stored in the operating system keychain.
+- Device names and connection profiles are stored locally by Klimat.
+- Cloud connections require the manufacturer's service. Local connections require access to the device on the same network.
+- Never commit real account credentials, device tokens, or keys. Run [Gitleaks](https://github.com/gitleaks/gitleaks) before publishing changes.
+- Home Assistant is used as a protocol reference only. Klimat does not connect to or require a Home Assistant server.
+
+## Localization and icons
+
+The interface supports Swedish (`sv`), English (`en`), German (`de`), French (`fr`), Spanish (`es`), Italian (`it`), Portuguese (`pt`), Dutch (`nl`), Danish (`da`), Norwegian Bokmål (`nb`), Finnish (`fi`), Polish (`pl`), Czech (`cs`), Slovak (`sk`), Hungarian (`hu`), Romanian (`ro`), Greek (`el`), Turkish (`tr`), Japanese (`ja`), and Simplified Chinese (`zh`). The system language is selected on first launch; users can change it in the popup.
+
+Translations are in `src/i18n.ts`. Each locale uses the same message keys. Preserve placeholders and control meanings, and check the compact popup for text overflow when changing strings.
+
+The repository includes platform app icons, a separate tray icon, and generated SVG icons for providers. Linux desktop integration uses `se.klimakontroll.desktop`; macOS uses an `.icns` app icon; Windows uses an `.ico` icon.
+
+## Development
+
+Install Node.js, pnpm, Rust, Python 3, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your operating system. Python adapter packaging also needs the dependencies in `requirements-build.txt`.
 
 ```sh
 pnpm install
@@ -46,7 +58,7 @@ pnpm setup:adapters
 pnpm tauri dev
 ```
 
-The Python bridge can be packaged as an OS-native executable before building the desktop app:
+To build an installer locally:
 
 ```sh
 python3 -m pip install -r requirements-build.txt
@@ -54,25 +66,12 @@ pnpm build:adapter
 pnpm tauri build
 ```
 
-Build installers on the target OS. The GitHub Actions matrix targets Linux x64 (`.deb` and `.rpm`), macOS Intel (`.dmg`), macOS Apple Silicon (`.dmg`), and Windows x64 (`.msi` and NSIS `.exe`). Each platform/architecture is uploaded as a separate workflow artifact. A successful workflow run and a physical-device check are required before calling those platform releases verified.
-
-## Localization
-
-The interface supports Swedish (`sv`), English (`en`), German (`de`), French (`fr`), Spanish (`es`), Italian (`it`), Portuguese (`pt`), Dutch (`nl`), Danish (`da`), Norwegian Bokmål (`nb`), Finnish (`fi`), Polish (`pl`), Czech (`cs`), Slovak (`sk`), Hungarian (`hu`), Romanian (`ro`), Greek (`el`), Turkish (`tr`), Japanese (`ja`), and Simplified Chinese (`zh`).
-
-Translations live in `src/i18n.ts`. Each locale uses the same ordered message keys. When contributing a translation, preserve placeholders and control meanings, and check the compact popup for text overflow. Swedish is the source locale.
-
-## Security and privacy
-
-- MELCloud credentials, Midea keys, and Gree pairing keys are stored in the OS keychain by the Rust application.
-- Device names and connection profiles are stored locally by the app.
-- Cloud control requires access to the relevant manufacturer's service. Local control requires network access to the device.
-- Never commit real account credentials, device tokens, or keys. Run [Gitleaks](https://github.com/gitleaks/gitleaks) before publishing changes.
+Build installers on their target operating system. The CI workflow builds the Linux, macOS, and Windows targets listed above. The bundled Python adapter includes the MELCloud and Midea-compatible clients; Gree uses the `gree-climate` Rust crate, and Daikin uses its local HTTP API directly.
 
 ## License and third-party notices
 
-Klimat is currently distributed without a project license file. Until a license is added, do not assume the source is available for reuse. Bundled adapter builds collect third-party license notices in `THIRD_PARTY_LICENSES.txt`, including the `gree-climate` MIT license. Review the licenses of `python-melcloud`, `midea-local`, and their transitive dependencies before redistributing a release. Home Assistant Core is Apache-2.0; if source code is copied from it, retain the required notices and license terms.
+This repository does not currently include a project license. Until one is added, do not assume that Klimat source code is licensed for reuse. Adapter builds collect third-party license notices in `THIRD_PARTY_LICENSES.txt`. Review the licenses of `python-melcloud`, `midea-local`, `gree-climate`, and their transitive dependencies before redistribution. Home Assistant Core is Apache-2.0; if source code is copied from it, retain the required notices and comply with its license.
 
 ## Contributing
 
-Issues and pull requests are welcome. Please include the operating system, desktop environment, connection type, and device model in reproducible bug reports. Do not include credentials or device secrets. Hardware compatibility reports should identify the adapter/model and the controls verified.
+Issues and pull requests are welcome. Include the operating system, desktop environment, connection type, and device model in reproducible reports. Do not include credentials or device secrets. Compatibility reports should say which controls were checked on the physical unit.

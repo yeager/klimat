@@ -868,6 +868,8 @@ def mitsubishi_local_state(controller, host, profile_id):
 
 
 def mitsubishi_local_request(payload):
+    import time
+
     from pymitsubishi import MitsubishiController
     from pymitsubishi.mitsubishi_parser import DriveMode, WindSpeed
 
@@ -892,6 +894,7 @@ def mitsubishi_local_request(payload):
                 if str(value) not in fans:
                     raise ValueError("Den valda fläkthastigheten stöds inte av Mitsubishi-adaptern.")
                 controller.set_fan_speed(fans[str(value)])
+            time.sleep(controller.wait_time_after_command)
         device = mitsubishi_local_state(controller, host, profile_id)
         if action == "discover" and already_known(payload, "mitsubishi-local", device["id"]):
             return {"devices": [], "profile": {}}

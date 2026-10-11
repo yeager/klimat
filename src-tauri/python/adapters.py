@@ -273,6 +273,311 @@ async def melcloud_status(payload):
         return result
 
 
+def melcloud_home_items(context):
+    for building in context.buildings:
+        for unit in building.air_to_air_units:
+            yield unit
+
+
+def melcloud_home_mode(value):
+    return {
+        "heat": "heat",
+        "cool": "cool",
+        "automatic": "auto",
+        "dry": "dry",
+        "fan": "fan",
+    }.get(str(value or "cool").lower(), "cool")
+
+
+def melcloud_home_fan(value):
+    current = str(value or "auto").lower()
+    if current in {"auto", "off"}:
+        return "auto"
+    speeds = ["one", "two", "three", "four", "five"]
+    try:
+        position = speeds.index(current) / max(1, len(speeds) - 1)
+    except ValueError:
+        return "auto"
+    return "low" if position < 1 / 3 else "medium" if position < 2 / 3 else "high"
+
+
+def melcloud_home_device(unit):
+    capabilities = unit.capabilities
+    modes = ["heat"]
+    if not capabilities or capabilities.has_cool_operation_mode:
+        modes.append("cool")
+    if not capabilities or capabilities.has_auto_operation_mode:
+        modes.append("auto")
+    if not capabilities or capabilities.has_dry_operation_mode:
+        modes.append("dry")
+    if not capabilities or capabilities.has_fan_operation_mode:
+        modes.append("fan")
+    current_mode = melcloud_home_mode(unit.operation_mode)
+    minimum = getattr(capabilities, "min_temp_cool", None) if capabilities else None
+    maximum = getattr(capabilities, "max_temp_cool", None) if capabilities else None
+    if current_mode == "heat" and capabilities:
+        minimum = capabilities.min_temp_heat or minimum
+        maximum = capabilities.max_temp_heat or maximum
+    item = {
+        "id": str(unit.id),
+        "name": unit.name or "Mitsubishi Electric AC",
+        "brand": "melcloud-home",
+        "kind": "cloud",
+        "state": "on" if unit.power else "off",
+        "target": unit.set_temperature or 22,
+        "temperatureStep": 0.5 if capabilities and capabilities.has_half_degree_increments else 1,
+        "current": unit.room_temperature or 0,
+        "mode": current_mode,
+        "fan": melcloud_home_fan(unit.set_fan_speed),
+        "availableModes": modes,
+    }
+    if minimum is not None:
+        item["minTarget"] = minimum
+    if maximum is not None:
+        item["maxTarget"] = maximum
+    return item
+
+
+def melcloud_home_find_unit(context, unit_id):
+    return next((unit for unit in melcloud_home_items(context) if str(unit.id) == str(unit_id)), None)
+
+
+async def melcloud_home_connect(payload, action="discover"):
+    from aiomelcloudhome import ATAOperationMode, MELCloudHome
+
+    profile = next((entry for entry in payload.get("profiles", []) if entry.get("id") == payload.get("id")), None)
+    if action != "discover" and profile is None:
+        raise ValueError("MELCloud Home-uppgifter saknas i systemets nyckelring. Anslut kontot igen.")
+    credentials = profile or payload
+    username, password = credentials.get("username"), credentials.get("password")
+    if not username or not password:
+        raise ValueError("Ange e-postadress och lösenord för MELCloud Home.")
+    async with MELCloudHome(username=username, password=password) as client:
+        context = await client.get_context()
+        selected = requested_ids(payload) if action == "restore" else None
+        result = []
+        limit = device_limit(payload)
+        if limit <= 0:
+            return {"devices": result, "profile": {}}
+        for unit in melcloud_home_items(context):
+            if selected is not None and str(unit.id) not in selected:
+                continue
+            if action == "discover" and already_known(payload, "melcloud-home", unit.id):
+                continue
+            if len(result) >= limit:
+                break
+            item = melcloud_home_device(unit)
+            item["connection"] = {"profile_id": payload.get("id")}
+            result.append(item)
+        return {"devices": result, "profile": {}}
+
+
+async def melcloud_home_command(payload):
+    from aiomelcloudhome import ATAFanSpeed, ATAOperationMode, MELCloudHome
+
+    active = next((p for p in payload.get("profiles", []) if p.get("id") == payload.get("profileId")), None)
+    if not active or not active.get("username") or not active.get("password"):
+        raise ValueError("MELCloud Home-sessionen saknas. Anslut kontot igen.")
+    async with MELCloudHome(username=active["username"], password=active["password"]) as client:
+        context = await client.get_context()
+        unit = melcloud_home_find_unit(context, payload["device"]["id"])
+        if unit is None:
+            raise ValueError("Enheten hittades inte i MELCloud Home-kontot.")
+        action, value = payload.get("action"), payload.get("value")
+        if action == "status":
+            return melcloud_home_device(unit)
+        controls = {}
+        if action == "power":
+            controls["power"] = value == "on"
+        elif action == "temperature":
+            target = float(value)
+            capabilities = unit.capabilities
+            minimum = getattr(capabilities, "min_temp_cool", None) if capabilities else None
+            maximum = getattr(capabilities, "max_temp_cool", None) if capabilities else None
+            if unit.operation_mode == ATAOperationMode.HEAT and capabilities:
+                minimum = capabilities.min_temp_heat or minimum
+                maximum = capabilities.max_temp_heat or maximum
+            if minimum is not None:
+                target = max(float(minimum), target)
+            if maximum is not None:
+                target = min(float(maximum), target)
+            controls["set_temperature"] = target
+        elif action == "mode":
+            controls["operation_mode"] = {
+                "cool": ATAOperationMode.COOL,
+                "heat": ATAOperationMode.HEAT,
+                "auto": ATAOperationMode.AUTOMATIC,
+                "dry": ATAOperationMode.DRY,
+                "fan": ATAOperationMode.FAN,
+            }.get(str(value))
+        elif action == "fan":
+            levels = max(1, min(5, int(getattr(unit.capabilities, "number_of_fan_speeds", 5) or 5)))
+            index = {"low": 0, "medium": (levels - 1) // 2, "high": levels - 1}.get(str(value))
+            speed = "AUTO" if value == "auto" else ("ONE", "TWO", "THREE", "FOUR", "FIVE")[index] if index is not None else None
+            controls["set_fan_speed"] = getattr(ATAFanSpeed, speed) if speed else None
+        else:
+            raise ValueError(f"MELCloud Home-kommandot stöds inte: {action}")
+        await client.control_ata_unit(str(unit.id), **controls)
+        refreshed = await client.get_context()
+        unit = melcloud_home_find_unit(refreshed, unit.id) or unit
+        return melcloud_home_device(unit)
+
+
+def thinq_mode(value):
+    return {"air_dry": "dry", "dry": "dry", "fan_only": "fan", "fan": "fan", "heat_cool": "auto"}.get(str(value or "").lower(), str(value or "cool").lower())
+
+
+def thinq_fan(value):
+    return {"mid": "medium", "nature": "auto", "low": "low", "medium": "medium", "high": "high"}.get(str(value or "").lower(), "auto")
+
+
+async def thinq_bridge(api, raw_device):
+    from thinqconnect import AirConditionerDevice, DeviceType
+    from thinqconnect.integration.homeassistant.api import HABridge
+
+    info = raw_device.get("deviceInfo") or {}
+    if info.get("deviceType") != DeviceType.AIR_CONDITIONER:
+        return None
+    device_id = str(raw_device.get("deviceId") or "")
+    if not device_id:
+        return None
+    profile = await api.async_get_device_profile(device_id)
+    constructor = {
+        "thinq_api": api,
+        "device_id": device_id,
+        "device_type": info.get("deviceType"),
+        "model_name": info.get("modelName"),
+        "alias": info.get("alias"),
+        "reportable": info.get("reportable"),
+        "profile": profile,
+        "energy_profile": None,
+    }
+    if info.get("groupId"):
+        constructor["group_id"] = info["groupId"]
+    return HABridge(AirConditionerDevice(**constructor))
+
+
+async def thinq_items(api, limit, selected=None, known=None):
+    from thinqconnect.integration.homeassistant.specification import ExtendedProperty
+
+    if limit <= 0:
+        return []
+    raw_devices = await api.async_get_device_list() or []
+    result = []
+    for raw in raw_devices:
+        info = raw.get("deviceInfo") or {}
+        device_id = str(raw.get("deviceId") or "")
+        if not device_id or (selected is not None and device_id not in selected):
+            continue
+        if known and already_known({"knownDevices": known}, "lg-thinq", device_id):
+            continue
+        bridge = await thinq_bridge(api, raw)
+        if bridge is None:
+            continue
+        await bridge.fetch_data()
+        indices = bridge.get_active_idx(ExtendedProperty.CLIMATE_AIR_CONDITIONER)
+        if not indices:
+            continue
+        state = bridge.state_map[indices[0]]
+        available_modes = list(dict.fromkeys(
+            mode for mode in (thinq_mode(item) for item in state.hvac_modes)
+            if mode in {"auto", "cool", "heat", "dry", "fan"}
+        ))
+        available_fans = list(dict.fromkeys(thinq_fan(item) for item in state.fan_modes))
+        result.append({
+            "id": device_id,
+            "name": info.get("alias") or "LG ThinQ AC",
+            "brand": "lg-thinq",
+            "kind": "cloud",
+            "state": "on" if state.is_on else "off",
+            "target": state.target_temp or 22,
+            "temperatureStep": state.step or 1,
+            "minTarget": state.min,
+            "maxTarget": state.max,
+            "current": state.current_temp or 0,
+            "mode": thinq_mode(state.hvac_mode) if state.is_on else "cool",
+            "fan": thinq_fan(state.fan_mode),
+            "availableModes": available_modes,
+            "availableFans": available_fans,
+            "_bridge": bridge,
+            "_idx": indices[0],
+        })
+        if len(result) >= limit:
+            break
+    return result
+
+
+def thinq_public_device(item):
+    bridge, index = item.get("_bridge"), item.get("_idx")
+    if bridge is not None and index in bridge.state_map:
+        state = bridge.state_map[index]
+        item = {
+            **item,
+            "state": "on" if state.is_on else "off",
+            "target": state.target_temp or item.get("target") or 22,
+            "temperatureStep": state.step or item.get("temperatureStep") or 1,
+            "minTarget": state.min if state.min is not None else item.get("minTarget"),
+            "maxTarget": state.max if state.max is not None else item.get("maxTarget"),
+            "current": state.current_temp or 0,
+            "mode": thinq_mode(state.hvac_mode) if state.is_on else "cool",
+            "fan": thinq_fan(state.fan_mode),
+        }
+    if item.get("minTarget") is None:
+        item.pop("minTarget", None)
+    if item.get("maxTarget") is None:
+        item.pop("maxTarget", None)
+    return {key: value for key, value in item.items() if not key.startswith("_")}
+
+
+async def thinq_request(payload, action):
+    import uuid
+    import aiohttp
+    from thinqconnect import ThinQApi
+
+    profile = next((entry for entry in payload.get("profiles", []) if entry.get("id") == (payload.get("id") if action in {"discover", "restore"} else payload.get("profileId"))), None)
+    credentials = profile or (payload if action == "discover" else None)
+    if not credentials or not credentials.get("token"):
+        raise ValueError("LG ThinQ-token saknas i systemets nyckelring. Anslut kontot igen.")
+    country = str(credentials.get("region") or "SE").upper()
+    client_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"klimat-lg-thinq-{credentials.get('id', '')}"))
+    async with aiohttp.ClientSession() as session:
+        api = ThinQApi(session=session, access_token=credentials["token"], country_code=country, client_id=client_id)
+        selected = requested_ids(payload) if action == "restore" else None
+        items = await thinq_items(api, device_limit(payload), selected, payload.get("knownDevices") if action == "discover" else None)
+        if action in {"discover", "restore"}:
+            return {"devices": [thinq_public_device(item) for item in items], "profile": {}}
+        device_id = str(payload.get("device", {}).get("id"))
+        item = next((entry for entry in items if entry["id"] == device_id), None)
+        if item is None:
+            item = next((entry for entry in await thinq_items(api, 6, {device_id}) if entry["id"] == device_id), None)
+        if item is None:
+            raise ValueError("LG ThinQ-luftkonditioneringen hittades inte på kontot.")
+        bridge, index = item["_bridge"], item["_idx"]
+        action_name, value = payload.get("action"), payload.get("value")
+        if action_name == "status":
+            pass
+        elif action_name == "power":
+            await bridge.async_turn_on(index) if value == "on" else await bridge.async_turn_off(index)
+        elif action_name == "temperature":
+            await bridge.async_set_target_temperature(index, float(value))
+        elif action_name == "mode":
+            state = bridge.state_map[index]
+            raw = next((option for option in state.hvac_modes if thinq_mode(option) == value), None)
+            if raw is None:
+                raise ValueError("Det valda driftläget stöds inte av den här LG-enheten.")
+            await bridge.async_set_hvac_mode(index, raw)
+        elif action_name == "fan":
+            state = bridge.state_map[index]
+            raw = next((option for option in state.fan_modes if thinq_fan(option) == value), None)
+            if raw is None:
+                raise ValueError("Den valda fläkthastigheten stöds inte av den här LG-enheten.")
+            await bridge.async_set_fan_mode(index, raw)
+        else:
+            raise ValueError(f"LG ThinQ-kommandot stöds inte: {action_name}")
+        await bridge.fetch_data()
+        return thinq_public_device({**item, "_idx": index})
+
+
 async def daikin_request(base_url, path, params=None):
     import aiohttp
 
@@ -445,11 +750,19 @@ async def handle(payload):
     action, brand = payload.get("action"), payload.get("brand")
     if action == "status" and brand == "melcloud":
         return await melcloud_status(payload)
+    if action == "status" and brand == "melcloud-home":
+        return await melcloud_home_command({**payload, "action": "status"})
+    if action == "status" and brand == "lg-thinq":
+        return await thinq_request(payload, action)
     if action == "status" and brand == "daikin":
         return await daikin_status(payload)
     if action == "discover":
         if brand == "melcloud":
             return await melcloud_connect(payload)
+        if brand == "melcloud-home":
+            return await melcloud_home_connect(payload)
+        if brand == "lg-thinq":
+            return await thinq_request(payload, action)
         if brand == "daikin":
             return await daikin_connect(payload)
         if brand in MIDEA_BRANDS:
@@ -458,6 +771,10 @@ async def handle(payload):
     if action == "restore":
         if brand == "melcloud":
             return await melcloud_restore(payload)
+        if brand == "melcloud-home":
+            return await melcloud_home_connect(payload, action)
+        if brand == "lg-thinq":
+            return await thinq_request(payload, action)
         if brand == "daikin":
             return await daikin_restore(payload)
         if brand in MIDEA_BRANDS:
@@ -465,6 +782,10 @@ async def handle(payload):
         raise ValueError(f"Integrationen {brand} stöds inte ännu.")
     if brand == "melcloud":
         return await melcloud_command(payload)
+    if brand == "melcloud-home":
+        return await melcloud_home_command(payload)
+    if brand == "lg-thinq":
+        return await thinq_request(payload, action)
     if brand == "daikin":
         return await daikin_command(payload)
     if brand in MIDEA_BRANDS:

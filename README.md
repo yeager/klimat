@@ -8,14 +8,18 @@ Klimat is an early prototype. The adapters and desktop packages build, but opera
 
 | Provider | Connection | Status and limits |
 | --- | --- | --- |
-| Mitsubishi Electric MELCloud | Cloud | MELCloud account login and supported climate controls. MELCloud Home is a separate service and is not supported yet. |
+| Mitsubishi Electric MELCloud Classic | Cloud | Email/password sign-in and power, setpoint, operating mode, and fan controls. |
+| Mitsubishi Electric MELCloud Home | Cloud | Separate service using the same account email/password and supported air-to-air controls. |
+| LG ThinQ | Cloud | Official ThinQ Connect API. Requires a Personal Access Token with air-conditioner access and the country where the LG account was created. |
 | Midea and compatible Comfee/Toshiba Lifestyle units | Local network | Broadcast discovery or a manually entered IP address. Compatibility depends on the unit and Wi-Fi module. |
 | Gree | Local network | Automatic discovery and pairing for supported units. |
 | Daikin | Local network | Manual IP address for adapters exposing the compatible, older local HTTP API. Cloud-only and newer authenticated adapters are not covered. |
 
 You can save up to six units. The popup offers power, target temperature, cool/heat/auto/dry/fan modes, and fan speed where the device supports them. It refreshes the selected unit while the popup is open and when it becomes visible again.
 
-MELCloud currently means the classic MELCloud service. If your unit is set up only in MELCloud Home, that connection will not work with this adapter. Do not share account credentials in bug reports. Check that the account can sign in to the matching official app or website before reporting a login issue.
+MELCloud Classic and MELCloud Home are separate services; choose the one used by your unit. For LG, create a token at [LG ThinQ Connect](https://connect-pat.lgthinq.com), grant it access to air conditioners, and select the country where the LG account was registered. Credentials and tokens are kept in the operating system keychain. Do not share them in bug reports. Check that the account works in the matching official app or website before reporting a login issue.
+
+Klimat does not yet implement local ECHONET Lite. Some Mitsubishi Electric Wi-Fi interfaces support it when enabled in the manufacturer's app. The `MSZ-LN35VG2W` is also reported working over its CN105 service connector with an ESPHome-compatible adapter. That requires additional hardware connected to the indoor unit; Klimat does not control CN105 directly.
 
 ## Download
 
@@ -34,7 +38,7 @@ Klimat starts hidden and opens a small popup from its tray icon. Clicking outsid
 
 ## Privacy and security
 
-- MELCloud credentials and local device keys are stored in the operating system keychain.
+- Cloud credentials, LG ThinQ tokens, and local device keys are stored in the operating system keychain.
 - Device names and connection profiles are stored locally by Klimat.
 - Cloud connections require the manufacturer's service. Local connections require access to the device on the same network.
 - Never commit real account credentials, device tokens, or keys. Run [Gitleaks](https://github.com/gitleaks/gitleaks) before publishing changes.
@@ -66,11 +70,11 @@ pnpm build:adapter
 pnpm tauri build
 ```
 
-Build installers on their target operating system. The CI workflow builds the Linux, macOS, and Windows targets listed above. The bundled Python adapter includes the MELCloud and Midea-compatible clients; Gree uses the `gree-climate` Rust crate, and Daikin uses its local HTTP API directly.
+Build installers on their target operating system. The CI workflow builds the Linux, macOS, and Windows targets listed above. The bundled Python adapter includes clients for MELCloud Classic, MELCloud Home, LG ThinQ Connect, and Midea-compatible units; Gree uses the `gree-climate` Rust crate, and Daikin uses its local HTTP API directly.
 
 ## License and third-party notices
 
-This repository does not currently include a project license. Until one is added, do not assume that Klimat source code is licensed for reuse. Adapter builds collect third-party license notices in `THIRD_PARTY_LICENSES.txt`. Review the licenses of `python-melcloud`, `midea-local`, `gree-climate`, and their transitive dependencies before redistribution. Home Assistant Core is Apache-2.0; if source code is copied from it, retain the required notices and comply with its license.
+This repository does not currently include a project license. Until one is added, do not assume that Klimat source code is licensed for reuse. Adapter builds collect third-party license notices in `THIRD_PARTY_LICENSES.txt`. Review the licenses of `python-melcloud`, `aiomelcloudhome`, `thinqconnect`, `midea-local`, `gree-climate`, and their transitive dependencies before redistribution. The ThinQ Connect SDK is Apache-2.0 and the MELCloud Home client is MIT-licensed. Home Assistant Core is Apache-2.0; if source code is copied from it, retain the required notices and comply with its license.
 
 ## Contributing
 

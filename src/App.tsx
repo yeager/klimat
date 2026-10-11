@@ -5,7 +5,7 @@ import "./App.css";
 
 type ConnectionKind = "direct" | "cloud";
 type Brand = { id: string; name: string; kind: ConnectionKind; description: string; status: "ready" | "planned"; tint: string };
-type Device = { id: string; name: string; brand: string; kind: ConnectionKind; state: string; target: number; current: number; mode: string; fan: string; profileId?: string; connection?: Record<string, unknown> };
+type Device = { id: string; name: string; brand: string; kind: ConnectionKind; state: string; target: number; current: number; mode: string; fan: string; online?: boolean; profileId?: string; connection?: Record<string, unknown> };
 type Profile = { id: string; kind: ConnectionKind; brand: string; label: string; endpoint: string; region: string };
 type ConnectionDraft = { username?: string; password?: string; endpoint?: string; region?: string; token?: string; key?: string };
 const brands: Brand[] = [
@@ -25,7 +25,7 @@ const modes = [{ id: "cool", label: "Kyla", icon: "❄" }, { id: "heat", label: 
 
 function App() {
   const [profiles, setProfiles] = useState<Profile[]>(() => JSON.parse(localStorage.getItem("klimat-profiles") || "[]"));
-  const [devices, setDevices] = useState<Device[]>(() => JSON.parse(localStorage.getItem("klimat-devices") || "[]"));
+  const [devices, setDevices] = useState<Device[]>(() => (JSON.parse(localStorage.getItem("klimat-devices") || "[]") as Device[]).map((device) => ({ ...device, online: undefined })));
   const [selected, setSelected] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [category, setCategory] = useState<ConnectionKind>("direct");
@@ -64,18 +64,14 @@ function App() {
         try {
           const response = await invoke<{ devices: Device[] }>("climate_request", { payload: { ...saved, id: saved.id, profiles, ...(profileDevices.length ? { deviceIds } : {}), maxDevices: remaining, action: "restore" } });
           const known = new Set(recovered.map(deviceKey));
-          recovered.push(...response.devices.map((device) => ({ ...device, brand: saved.brand, profileId: saved.id, connection: { ...device.connection, profileId: saved.id } })).filter((device) => !known.has(deviceKey(device))).slice(0, remaining));
+          recovered.push(...response.devices.map((device) => ({ ...device, online: true, brand: saved.brand, profileId: saved.id, connection: { ...device.connection, profileId: saved.id } })).filter((device) => !known.has(deviceKey(device))).slice(0, remaining));
         } catch { /* Offline devices stay saved and can be retried from settings. */ }
       }
       if (!cancelled) {
         const restoredKeys = new Set(recovered.map(deviceKey));
         const offline = savedDevices.filter((device) => !restoredKeys.has(deviceKey(device)));
         // Keep saved devices first so offline ones cannot be crowded out by cloud results.
-        const unique = [...new Map([...savedDevices, ...recovered].map((device) => [deviceKey(device), device])).values()].slice(0, MAX_DEVICES);
-        for (const device of recovered) {
-          const index = unique.findIndex((item) => deviceKey(item) === deviceKey(device));
-          if (index >= 0 && !offline.some((item) => deviceKey(item) === deviceKey(device))) unique[index] = device;
-        }
+        const unique = [...new Map([...offline.map((device) => ({ ...device, online: false })), ...recovered].map((device) => [deviceKey(device), device])).values()].slice(0, MAX_DEVICES);
         setDevices(unique);
         if (unique.length) setSelected((current) => unique.some((device) => deviceKey(device) === current) ? current : deviceKey(unique[0]));
       }
@@ -93,8 +89,8 @@ function App() {
       refreshing = true;
       try {
         const updated: Partial<Device> = await invoke("climate_request", { payload: { kind: active.kind, brand: active.brand, action: "status", device: active, profileId: active.profileId, profiles } });
-        if (!cancelled) setDevices((current) => current.map((device) => deviceKey(device) === deviceKey(active) ? { ...device, ...updated } : device));
-      } catch { /* Keep the last known state while a device or cloud service is offline. */ }
+        if (!cancelled) setDevices((current) => current.map((device) => deviceKey(device) === deviceKey(active) ? { ...device, ...updated, online: true } : device));
+      } catch { if (!cancelled) setDevices((current) => current.map((device) => deviceKey(device) === deviceKey(active) ? { ...device, online: false } : device)); }
       finally { refreshing = false; }
     };
     const pollInterval = active.brand === "melcloud" ? 15 * 60_000 : 30_000;
@@ -116,7 +112,7 @@ function App() {
       const next = { id: crypto.randomUUID(), kind: category, brand: brandId, label: chosenBrand.name, endpoint: profile.endpoint || "", region: profile.region || "eu", username: profile.username || "", password: profile.password || "", token: profile.token || "", key: profile.key || "" };
       const response = await invoke<{ devices: Device[]; profile?: Partial<Profile> }>("climate_request", { payload: { ...next, profiles, knownDevices: devices.map(({ id, brand }) => ({ id: String(id), brand })), kind: category, brand: brandId, maxDevices: MAX_DEVICES - deviceCount, action: "discover" } });
       const knownIds = new Set(devices.map(deviceKey));
-      const newDevices = response.devices.map((device) => ({ ...device, brand: brandId, profileId: next.id, connection: { ...device.connection, profileId: next.id } })).filter((device) => !knownIds.has(deviceKey(device))).slice(0, Math.max(0, MAX_DEVICES - deviceCount));
+      const newDevices = response.devices.map((device) => ({ ...device, online: true, brand: brandId, profileId: next.id, connection: { ...device.connection, profileId: next.id } })).filter((device) => !knownIds.has(deviceKey(device))).slice(0, Math.max(0, MAX_DEVICES - deviceCount));
       const savedProfile: Profile = { id: next.id, kind: category, brand: brandId, label: chosenBrand.name, endpoint: next.endpoint, region: next.region };
       if (newDevices.length || !devices.length) setProfiles((current) => [...current, savedProfile]);
       if (response.devices.length > newDevices.length && deviceCount + newDevices.length >= MAX_DEVICES) setMessage(t("deviceLimit"));
@@ -131,9 +127,9 @@ function App() {
     setBusy(true); setMessage("");
     try {
       const updated: Partial<Device> = await invoke("climate_request", { payload: { kind: active.kind, brand: active.brand, action, value, device: active, profileId: active.profileId, profiles } });
-      setDevices((current) => current.map((device) => deviceKey(device) === deviceKey(active) ? { ...device, ...updated } : device));
+      setDevices((current) => current.map((device) => deviceKey(device) === deviceKey(active) ? { ...device, ...updated, online: true } : device));
       setMessage(t("sent"));
-    } catch (err) { setMessage(err instanceof Error ? err.message : t("commandFailed")); }
+    } catch (err) { setDevices((current) => current.map((device) => deviceKey(device) === deviceKey(active) ? { ...device, online: false } : device)); setMessage(err instanceof Error ? err.message : t("commandFailed")); }
     finally { setBusy(false); }
   }
 
@@ -164,7 +160,7 @@ function App() {
     </> : <div className="planned-card"><b>{t("planned")}</b><p>{t("plannedHint")}</p></div>}{message && <p className="feedback">{message}</p>}</section> : <>
       {active ? <>{devices.length > 1 && <div className="device-tabs">{devices.map((device) => { const brand = brands.find((item) => item.id === device.brand); return <button key={deviceKey(device)} className={`device-tab ${deviceKey(active) === deviceKey(device) ? "active" : ""}`} onClick={() => setSelected(deviceKey(device))} title={device.name}><span className="device-brand-icon" style={{ "--manufacturer-tint": brand?.tint || "#e9efeb" } as React.CSSProperties}><img src={`/manufacturer-icons/${device.brand}.svg`} alt="" /></span>{device.name}</button>; })}</div>}<section className="control-card"><div className="card-top"><div><h3>{active.name}</h3><span className="eyebrow">{active.kind === "cloud" ? t("cloud").toUpperCase() : t("local").toUpperCase()} · {active.state === "on" ? t("on") : t("off")}</span></div><div className="card-actions"><button className="remove-device" disabled={busy} aria-label={t("removeDevice")} title={t("removeDevice")} onClick={() => void forgetActiveDevice()}>×</button><button className={`power ${active.state === "on" ? "on" : ""}`} disabled={busy} aria-label={active.state === "on" ? t("off") : t("on")} onClick={() => void command("power", active.state === "on" ? "off" : "on")}>⏻</button></div></div><div className="temperature"><span>{active.current}<small>°</small></span><div><b>{modes.find((mode) => mode.id === active.mode)?.label || t("off")}</b><small>{t("indoor")}</small></div></div><div className="target-row"><div><span className="eyebrow">{t("setpoint")}</span><strong>{active.target}<small>°C</small></strong></div><div className="stepper"><button disabled={busy} aria-label={t("lowerTemp")} onClick={() => void command("temperature", active.target - 0.5)}>−</button><button disabled={busy} aria-label={t("raiseTemp")} onClick={() => void command("temperature", active.target + 0.5)}>＋</button></div></div><div className="control-divider"/><div className="mode-grid">{modes.map((mode) => <button key={mode.id} disabled={busy} aria-label={t(mode.id as MessageKey)} onClick={() => void command("mode", mode.id)} className={`mode-button ${active.mode === mode.id ? "selected" : ""}`}><span>{mode.icon}</span>{t(mode.id as MessageKey)}</button>)}</div><label className="select-label">{t("fan")}<select aria-label={t("fan")} value={active.fan} disabled={busy} onChange={(e) => void command("fan", e.target.value)}><option value="auto">{t("auto")}</option><option value="low">{t("low")}</option><option value="medium">{t("medium")}</option><option value="high">{t("high")}</option></select></label></section></> : <section className="empty-card"><h3>{t("emptyTitle")}</h3><p>{t("emptyHint")}</p><div className="connection-options"><button onClick={() => beginAdd("direct")}><span>⌁</span><b>{t("local")}</b><small>{t("localBrand")}</small></button><button onClick={() => beginAdd("cloud")}><span>☁</span><b>{t("cloud")}</b><small>{t("cloudBrand")}</small></button></div></section>}
     </>}
-    <footer><span className="status-light" />{message && !showAdd ? message : active ? `${active.brand} · ${busy ? t("sending") : t("connected")}` : t("localStorage")}</footer>
+    <footer><span className={`status-light ${active?.online === false ? "offline" : active?.online === undefined ? "checking" : ""}`} aria-hidden="true" />{message && !showAdd ? message : active ? `${active.brand} · ${busy ? t("sending") : active.online === false ? t("offline") : active.online === true ? t("connected") : t("checking")}` : t("localStorage")}</footer>
   </main>;
 }
 

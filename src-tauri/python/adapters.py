@@ -1,0 +1,186 @@
+"""Climate adapters using the same client libraries as Home Assistant Core."""
+
+
+def climate_device(device, brand, kind):
+    operation_mode = str(getattr(device, "operation_mode", "cool") or "cool").lower()
+    return {
+        "id": str(getattr(device, "device_id", getattr(device, "id", ""))),
+        "name": getattr(device, "name", None) or f"{brand} AC",
+        "brand": brand,
+        "kind": kind,
+        "state": "on" if getattr(device, "power", False) else "off",
+        "target": getattr(device, "target_temperature", 22) or 22,
+        "current": getattr(device, "room_temperature", getattr(device, "current_temperature", 0)) or 0,
+        "mode": {"heat_cool": "auto", "fan_only": "fan"}.get(operation_mode, operation_mode),
+        "fan": str(getattr(device, "fan_speed", "auto")).lower(),
+    }
+
+
+async def melcloud_connect(payload):
+    import aiohttp
+    import pymelcloud
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            client = await pymelcloud.login(payload["username"], payload["password"], session=session)
+        except (AttributeError, KeyError, TypeError) as error:
+            raise ValueError("MELCloud-inloggningen misslyckades. Kontrollera e-postadress och lösenord.") from error
+        devices = await client.get_devices()
+        result = []
+        for group in devices.values():
+            for device in group:
+                await device.update()
+                item = climate_device(device, "melcloud", "cloud")
+                item["id"] = str(device.device_id)
+                item["connection"] = {"profile_id": payload["id"], "serial": str(device.serial)}
+                result.append(item)
+        return {"devices": result, "profile": {}}
+
+
+def midea_connect(payload):
+    from midealocal.const import ProtocolVersion
+    from midealocal.discover import discover
+    from midealocal.devices import device_selector
+
+    host = payload.get("endpoint") or None
+    found = discover(ip_address=host if host else None)
+    saved_profile = next((profile for profile in payload.get("profiles", []) if profile.get("id") == payload.get("id")), {})
+    saved_connections = {str(entry.get("id")): entry.get("connection", {}) for entry in saved_profile.get("mideaDevices", [])}
+    for appliance_id, details in found.items():
+        details.update(saved_connections.get(str(appliance_id), {}))
+    result = []
+    for appliance_id, details in found.items():
+        details["token"] = payload.get("token") or details.get("token")
+        details["key"] = payload.get("key") or details.get("key")
+        device = device_selector(details.get("name", "Midea AC"), appliance_id, details["type"], details["ip_address"], details["port"], details.get("token", ""), details.get("key", ""), ProtocolVersion(details["protocol"]), details["model"], details.get("subtype", 0), "", details.get("mac"), details.get("sn"))
+        if device is None or not device.connect(check_protocol=True):
+            continue
+        try:
+            result.append({
+                "id": str(appliance_id),
+                "name": details.get("name") or "Midea AC",
+                "brand": "midea",
+                "kind": "direct",
+                "state": "on" if device.get_attribute("power") else "off",
+                "target": device.get_attribute("target_temperature") or 22,
+                "current": device.get_attribute("indoor_temperature") or 0,
+                "mode": {"heat": "heat", "cool": "cool", "auto": "auto", "dry": "dry", "fan_only": "fan"}.get(device.raw_hvac_mode() or "cool", "cool"),
+                "fan": normalize_midea_fan(device.raw_fan_mode()),
+                "connection": {key: value for key, value in details.items() if key not in {"token", "key"}} | {"profile_id": payload["id"]},
+            })
+        finally:
+            device.close_socket()
+    private_devices = []
+    for item in result:
+        details = found[int(item["id"])]
+        private_devices.append({"id": item["id"], "connection": {**item["connection"], "token": details.get("token"), "key": details.get("key")}})
+    return {"devices": result, "profile": {"mideaDevices": private_devices}}
+
+
+async def melcloud_restore(payload):
+    import aiohttp
+    import pymelcloud
+
+    profile = next((entry for entry in payload.get("profiles", []) if entry.get("id") == payload.get("id")), None)
+    if not profile or not profile.get("username") or not profile.get("password"):
+        raise ValueError("MELCloud-uppgifter saknas i systemets nyckelring. Anslut kontot igen.")
+    async with aiohttp.ClientSession() as session:
+        try:
+            client = await pymelcloud.login(profile["username"], profile["password"], session=session)
+        except (AttributeError, KeyError, TypeError) as error:
+            raise ValueError("MELCloud kunde inte logga in. Kontrollera kontot i inställningarna.") from error
+        devices = await client.get_devices()
+        result = []
+        for group in devices.values():
+            for device in group:
+                await device.update()
+                item = climate_device(device, "melcloud", "cloud")
+                item["id"] = str(device.device_id)
+                item["connection"] = {"profile_id": payload["id"], "serial": str(device.serial)}
+                result.append(item)
+        return {"devices": result, "profile": {}}
+
+
+async def melcloud_command(payload):
+    import aiohttp
+    import pymelcloud
+
+    active_profile = payload.get("profileId")
+    active = next((p for p in payload.get("profiles", []) if p.get("id") == active_profile), None)
+    async with aiohttp.ClientSession() as session:
+        if not active:
+            raise ValueError("MELCloud-sessionen saknas. Anslut kontot igen.")
+        try:
+            client = await pymelcloud.login(active["username"], active["password"], session=session)
+        except (AttributeError, KeyError, TypeError) as error:
+            raise ValueError("MELCloud-inloggningen misslyckades. Kontrollera kontot och anslut igen.") from error
+        devices = await client.get_devices()
+        device = next((d for group in devices.values() for d in group if str(d.device_id) == str(payload["device"]["id"])), None)
+        if device is None:
+            raise ValueError("Enheten hittades inte i MELCloud-kontot.")
+        action, value = payload["action"], payload.get("value")
+        mode = {"cool": "cool", "heat": "heat", "auto": "heat_cool", "dry": "dry", "fan": "fan_only"}.get(str(value), value)
+        fan = {"auto": "auto", "low": "1", "medium": "2", "high": "3"}.get(str(value), value)
+        properties = {"power": value == "on"} if action == "power" else {"target_temperature": float(value)} if action == "temperature" else {"operation_mode": mode} if action == "mode" else {"fan_speed": fan} if action == "fan" else {}
+        if not properties:
+            raise ValueError(f"Unsupported MELCloud command: {action}")
+        await device.set(properties)
+        result = climate_device(device, "melcloud", "cloud")
+        result["id"] = payload["device"]["id"]
+        result["brand"] = "melcloud"
+        return result
+
+
+def midea_command(payload):
+    from midealocal.const import ProtocolVersion
+    from midealocal.devices import device_selector
+    item = payload["device"]
+    profile_id = payload.get("profileId")
+    profile = next((entry for entry in payload.get("profiles", []) if entry.get("id") == profile_id), {})
+    saved = next((entry.get("connection") for entry in profile.get("mideaDevices", []) if str(entry.get("id")) == str(item.get("id"))), {})
+    data = {**saved, **(item.get("connection") or {})}
+    device = device_selector(item["name"], int(item["id"]), data["type"], data["ip_address"], data["port"], data["token"], data["key"], ProtocolVersion(data["protocol"]), data["model"], data["subtype"], "", data.get("mac"), data.get("sn"))
+    if device is None or not device.connect(check_protocol=True):
+        raise ConnectionError("Kunde inte ansluta till Midea-enheten.")
+    try:
+        action, value = payload["action"], payload.get("value")
+        if action == "power": device.turn_on() if value == "on" else device.turn_off()
+        elif action == "temperature": device.set_raw_target_temperature(float(value), None)
+        elif action == "mode":
+            device.set_raw_hvac_mode({"cool": "cool", "heat": "heat", "auto": "auto", "dry": "dry", "fan": "fan_only"}.get(str(value), str(value)))
+        elif action == "fan":
+            device.set_raw_fan_mode({"auto": "auto", "low": "low", "medium": "medium", "high": "high"}.get(str(value), str(value)))
+        else: raise ValueError(f"Unsupported Midea command: {action}")
+        device.refresh_status()
+        updated_mode = {"heat": "heat", "cool": "cool", "auto": "auto", "dry": "dry", "fan_only": "fan"}.get(device.raw_hvac_mode() or "cool", "cool")
+        return {"state": "on" if device.get_attribute("power") else "off", "target": device.get_attribute("target_temperature") or 22, "current": device.get_attribute("indoor_temperature") or 0, "mode": updated_mode, "fan": normalize_midea_fan(device.raw_fan_mode())}
+    finally:
+        device.close_socket()
+
+
+def normalize_midea_fan(value):
+    fan = str(value or "auto").lower()
+    if fan in {"silent", "low"}:
+        return "low"
+    if fan in {"medium", "mid"}:
+        return "medium"
+    if fan in {"high", "full", "full_speed"}:
+        return "high"
+    return "auto"
+
+
+async def handle(payload):
+    action, brand = payload.get("action"), payload.get("brand")
+    if action == "discover":
+        if brand == "melcloud":
+            return await melcloud_connect(payload)
+        return midea_connect(payload)
+    if action == "restore":
+        if brand == "melcloud":
+            return await melcloud_restore(payload)
+        return midea_connect(payload)
+    if brand == "melcloud":
+        return await melcloud_command(payload)
+    if brand == "midea":
+        return midea_command(payload)
+    raise ValueError(f"Integrationen {brand} stöds inte ännu.")

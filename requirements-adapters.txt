@@ -1,0 +1,3 @@
+aiohttp>=3.12,<4
+python-melcloud==0.1.3
+midea-local==12.2.0

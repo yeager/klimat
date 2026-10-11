@@ -1,0 +1,70 @@
+name: Build desktop installers
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux-x64
+          - os: macos-15-intel
+            target: macos-x64
+          - os: macos-15
+            target: macos-arm64
+          - os: windows-latest
+            target: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux desktop build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl file libayatana-appindicator3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf wget
+
+      - name: Install Python adapter and freezer dependencies
+        run: python -m pip install -r requirements-build.txt
+
+      - name: Build bundled climate adapter
+        run: |
+          python src-tauri/python/collect_licenses.py
+          python -m PyInstaller --clean --noconfirm --onefile --collect-submodules midealocal --collect-submodules pymelcloud --name klimat-adapter --distpath src-tauri/python/dist src-tauri/python/adapter_cli.py
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build installers
+        run: pnpm tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: klimat-${{ matrix.target }}
+          path: src-tauri/target/release/bundle/**
+          if-no-files-found: error

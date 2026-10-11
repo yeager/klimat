@@ -1,0 +1,14 @@
+node_modules
+dist
+outputs/
+work/
+src-tauri/target
+src-tauri/gen/schemas
+__pycache__
+*.pyc
+src-tauri/python/dist/
+/build/
+/klimat-adapter.spec
+work/build-venv/
+.DS_Store
+*.local

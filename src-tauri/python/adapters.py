@@ -43,7 +43,7 @@ def midea_connect(payload):
     from midealocal.devices import device_selector
 
     host = payload.get("endpoint") or None
-    found = discover(ip_address=host if host else None)
+    found = discover(ip_address=[host] if host else None)
     saved_profile = next((profile for profile in payload.get("profiles", []) if profile.get("id") == payload.get("id")), {})
     saved_connections = {str(entry.get("id")): entry.get("connection", {}) for entry in saved_profile.get("mideaDevices", [])}
     for appliance_id, details in found.items():

@@ -5,7 +5,7 @@ import "./App.css";
 
 type ConnectionKind = "direct" | "cloud";
 type Brand = { id: string; name: string; kind: ConnectionKind; description: string; status: "ready" | "planned"; tint: string };
-type Device = { id: string; name: string; brand: string; kind: ConnectionKind; state: string; target: number; current: number; mode: string; fan: string; online?: boolean; profileId?: string; connection?: Record<string, unknown> };
+type Device = { id: string; name: string; brand: string; kind: ConnectionKind; state: string; target: number; current: number; mode: string; fan: string; temperatureStep?: number; online?: boolean; profileId?: string; connection?: Record<string, unknown> };
 type Profile = { id: string; kind: ConnectionKind; brand: string; label: string; endpoint: string; region: string };
 type ConnectionDraft = { username?: string; password?: string; endpoint?: string; region?: string; token?: string; key?: string };
 const brands: Brand[] = [
@@ -39,7 +39,7 @@ function App() {
   const active = useMemo(() => devices.find((device) => deviceKey(device) === selected) || devices[0], [devices, selected]);
   const chosenBrand = brands.find((brand) => brand.id === brandId) || brands[0];
   const deviceCount = new Set(devices.map(deviceKey)).size;
-  const temperatureStep = active?.brand === "gree" ? 1 : 0.5;
+  const temperatureStep = active?.temperatureStep || (active?.brand === "gree" || active?.brand === "daikin" ? 1 : 0.5);
 
   useEffect(() => { localStorage.setItem("klimat-profiles", JSON.stringify(profiles)); }, [profiles]);
   useEffect(() => { localStorage.setItem("klimat-devices", JSON.stringify(devices)); }, [devices]);

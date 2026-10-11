@@ -343,6 +343,7 @@ fn device_state(info: &DeviceInfo, state: &gree_climate::State, profile_id: &str
         "kind": "direct",
         "state": if state.power { "on" } else { "off" },
         "target": to_celsius(state.target_temperature),
+        "temperatureStep": 1,
         "current": state.current_temperature.map(to_celsius).unwrap_or(0.0),
         "mode": match state.mode { Mode::Auto => "auto", Mode::Cool => "cool", Mode::Dry => "dry", Mode::Fan => "fan", Mode::Heat => "heat" },
         "fan": fan,

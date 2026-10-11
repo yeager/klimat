@@ -24,6 +24,14 @@ def already_known(payload, brand, appliance_id):
     return any(str(item.get("id")) == str(appliance_id) and item.get("brand") == brand for item in payload.get("knownDevices", []) if isinstance(item, dict))
 
 
+def temperature_step(device, attribute, default):
+    try:
+        step = float(getattr(device, attribute, default) or default)
+        return step if step > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
 def climate_device(device, brand, kind):
     operation_mode = str(getattr(device, "operation_mode", "cool") or "cool").lower()
     return {
@@ -33,6 +41,7 @@ def climate_device(device, brand, kind):
         "kind": kind,
         "state": "on" if getattr(device, "power", False) else "off",
         "target": getattr(device, "target_temperature", 22) or 22,
+        "temperatureStep": temperature_step(device, "temperature_increment", 0.5),
         "current": getattr(device, "room_temperature", getattr(device, "current_temperature", 0)) or 0,
         "mode": {"heat_cool": "auto", "fan_only": "fan"}.get(operation_mode, operation_mode),
         "fan": normalize_melcloud_fan(device),
@@ -100,6 +109,7 @@ def midea_connect(payload):
                 "kind": "direct",
                 "state": "on" if device.get_attribute("power") else "off",
                 "target": device.get_attribute("target_temperature") or 22,
+                "temperatureStep": temperature_step(device, "temperature_step", 0.5),
                 "current": device.get_attribute("indoor_temperature") or 0,
                 "mode": {"heat": "heat", "cool": "cool", "auto": "auto", "dry": "dry", "fan_only": "fan"}.get(device.raw_hvac_mode() or "cool", "cool"),
                 "fan": normalize_midea_fan(device.raw_fan_mode()),
@@ -257,6 +267,7 @@ async def daikin_read(payload):
         "kind": "direct",
         "state": "on" if control.get("pow") == "1" else "off",
         "target": daikin_temperature(control.get("stemp"), 22),
+        "temperatureStep": 1,
         "current": daikin_temperature(sensor.get("htemp"), 0),
         "mode": DAIKIN_MODES.get(raw_mode, "auto"),
         "fan": daikin_fan(control.get("f_rate", "A")),

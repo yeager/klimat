@@ -148,6 +148,30 @@ async def melcloud_command(payload):
         return result
 
 
+async def melcloud_status(payload):
+    import aiohttp
+    import pymelcloud
+
+    active_profile = payload.get("profileId")
+    active = next((p for p in payload.get("profiles", []) if p.get("id") == active_profile), None)
+    if not active:
+        raise ValueError("MELCloud-sessionen saknas. Anslut kontot igen.")
+    async with aiohttp.ClientSession() as session:
+        try:
+            token = await pymelcloud.login(active["username"], active["password"], session=session)
+        except (AttributeError, KeyError, TypeError) as error:
+            raise ValueError("MELCloud-inloggningen misslyckades. Kontrollera kontot och anslut igen.") from error
+        devices = await pymelcloud.get_devices(token, session=session)
+        device = next((d for group in devices.values() for d in group if str(d.device_id) == str(payload["device"]["id"])), None)
+        if device is None:
+            raise ValueError("Enheten hittades inte i MELCloud-kontot.")
+        await device.update()
+        result = climate_device(device, "melcloud", "cloud")
+        result["id"] = payload["device"]["id"]
+        result["brand"] = "melcloud"
+        return result
+
+
 async def daikin_request(base_url, path, params=None):
     import aiohttp
 
@@ -251,6 +275,14 @@ async def daikin_command(payload):
     return await daikin_read({"endpoint": endpoint, "profileId": payload.get("profileId")})
 
 
+async def daikin_status(payload):
+    active = next((entry for entry in payload.get("profiles", []) if entry.get("id") == payload.get("profileId")), None)
+    endpoint = (payload.get("device", {}).get("connection") or {}).get("endpoint") or (active or {}).get("endpoint")
+    if not endpoint:
+        raise ValueError("Daikin-enhetens IP-adress saknas. Anslut enheten igen.")
+    return await daikin_read({"endpoint": endpoint, "profileId": payload.get("profileId")})
+
+
 def midea_command(payload):
     from midealocal.const import ProtocolVersion
     from midealocal.devices import device_selector
@@ -264,7 +296,8 @@ def midea_command(payload):
         raise ConnectionError("Kunde inte ansluta till Midea-enheten.")
     try:
         action, value = payload["action"], payload.get("value")
-        if action == "power": device.turn_on() if value == "on" else device.turn_off()
+        if action == "status": pass
+        elif action == "power": device.turn_on() if value == "on" else device.turn_off()
         elif action == "temperature": device.set_raw_target_temperature(float(value), None)
         elif action == "mode":
             device.set_raw_hvac_mode({"cool": "cool", "heat": "heat", "auto": "auto", "dry": "dry", "fan": "fan_only"}.get(str(value), str(value)))
@@ -306,6 +339,10 @@ def normalize_melcloud_fan(device):
 
 async def handle(payload):
     action, brand = payload.get("action"), payload.get("brand")
+    if action == "status" and brand == "melcloud":
+        return await melcloud_status(payload)
+    if action == "status" and brand == "daikin":
+        return await daikin_status(payload)
     if action == "discover":
         if brand == "melcloud":
             return await melcloud_connect(payload)

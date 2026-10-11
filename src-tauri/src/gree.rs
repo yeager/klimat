@@ -17,7 +17,7 @@ async fn handle(payload: &Value) -> Result<Value, String> {
     match payload.get("action").and_then(Value::as_str) {
         Some("discover") => discover(payload).await,
         Some("restore") => restore(payload).await,
-        Some("power" | "temperature" | "mode" | "fan") => command(payload).await,
+        Some("status" | "power" | "temperature" | "mode" | "fan") => command(payload).await,
         Some(action) => Err(format!("Gree-kommandot stöds inte: {action}")),
         None => Err("Gree-förfrågan saknar åtgärd.".into()),
     }
@@ -148,6 +148,14 @@ async fn command(payload: &Value) -> Result<Value, String> {
         .ok_or("Gree-enhetens nyckel saknas i systemets nyckelring. Anslut enheten igen.")?;
     let info = device_info(secret)?;
     let mut connection = connect_device(info.clone(), Some(secret)).await?;
+    if payload.get("action").and_then(Value::as_str) == Some("status") {
+        connection
+            .client
+            .refresh()
+            .await
+            .map_err(|error| error.to_string())?;
+        return Ok(device_state(&info, connection.client.state(), profile_id));
+    }
     let value = payload.get("value").ok_or("Gree-kommandot saknar värde.")?;
     match payload.get("action").and_then(Value::as_str) {
         Some("power") => connection

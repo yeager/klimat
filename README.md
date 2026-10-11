@@ -11,9 +11,10 @@
 - Midea and compatible devices over the local network.
 - Gree devices over the local network, with automatic discovery and pairing.
 - Daikin units with compatible local Wi-Fi adapters, including common BRP069 models.
-- Up to six AC units, with a compact manufacturer picker and a generated Klimat icon for every listed manufacturer.
-- Native app icons for Linux `.desktop` entries and packages, macOS app bundles, and Windows installers.
+- Up to six AC units, with a compact manufacturer picker and a distinct generated SVG icon for each provider.
+- Native app icons for each platform: Linux `.desktop` entries use a scalable hicolor SVG (`se.klimakontroll.desktop`), macOS bundles use `icon.icns`, and Windows installers use `icon.ico`. The tray icon is a separate compact asset so it stays legible in the panel/menu bar.
 - Power, temperature setpoint, cool/heat/auto/dry/fan modes, and fan speed.
+- Refreshes the selected unit's live status while the popup is open and when it becomes visible again.
 - Credentials and device keys stored in the operating system keychain.
 - Interface translated into 20 languages, including Swedish. The system language is detected on first launch; the language selector can override it.
 - Home Assistant integration code is used as a protocol reference. Klimat does not connect to or require a Home Assistant server.

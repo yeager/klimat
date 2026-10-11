@@ -20,7 +20,7 @@ You can save up to six units. The popup offers power, target temperature, cool/h
 
 MELCloud Classic and MELCloud Home are separate services; choose the one used by your unit. For LG, create a token at [LG ThinQ Connect](https://connect-pat.lgthinq.com), grant it access to air conditioners, and select the country where the LG account was registered. Credentials and tokens are kept in the operating system keychain. Do not share them in bug reports. Check that the account works in the matching official app or website before reporting a login issue.
 
-The Mitsubishi Electric ECHONET Lite adapter uses the manufacturer's documented TCP interface on port 3610. Some Wi-Fi interfaces support it when enabled in the Mitsubishi app; availability varies by adapter and region. The `MSZ-LN35VG2W` is also reported working over its CN105 service connector with an ESPHome-compatible adapter. That requires additional hardware connected to the indoor unit; Klimat does not control CN105 directly.
+The Mitsubishi Electric ECHONET Lite adapter uses UDP port 3610. Some Wi-Fi interfaces support it when enabled in the Mitsubishi app; availability varies by adapter and region. The `MSZ-LN35VG2W` is also reported working over its CN105 service connector with an ESPHome-compatible adapter. That requires additional hardware connected to the indoor unit; Klimat does not control CN105 directly.
 
 ## Download
 

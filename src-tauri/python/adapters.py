@@ -690,19 +690,10 @@ async def daikin_status(payload):
     return await daikin_read({"endpoint": endpoint, "profileId": payload.get("profileId")})
 
 
-def echonet_recv_exact(sock, size):
-    data = bytearray()
-    while len(data) < size:
-        chunk = sock.recv(size - len(data))
-        if not chunk:
-            raise ConnectionError("Mitsubishi-enheten stängde ECHONET Lite-anslutningen.")
-        data.extend(chunk)
-    return bytes(data)
-
-
 def echonet_exchange(host, instance, service, properties):
     import os
     import socket
+    import time
 
     destination = bytes((0x01, 0x30, instance))
     transaction_id = os.urandom(2)
@@ -717,24 +708,30 @@ def echonet_exchange(host, instance, service, properties):
         request.extend(value)
 
     try:
-        with socket.create_connection((host, 3610), timeout=3) as sock:
+        expected_ip = socket.gethostbyname(host)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.settimeout(3)
-            sock.sendall(request)
-            frame = bytearray(echonet_recv_exact(sock, 12))
-            if frame[0:2] != b"\x10\x81" or frame[2:4] != transaction_id:
-                raise ConnectionError("Mitsubishi-enheten svarade med ett ogiltigt ECHONET Lite-meddelande.")
-            count = frame[11]
-            for _ in range(count):
-                header = echonet_recv_exact(sock, 2)
-                frame.extend(header)
-                length = header[1]
-                frame.extend(echonet_recv_exact(sock, length))
+            # ECHONET Lite uses UDP port 3610 for requests and responses.
+            # Bind the standard client port so adapters that reply to 3610 work.
+            sock.bind(("", 3610))
+            sock.sendto(request, (expected_ip, 3610))
+            deadline = time.monotonic() + 3
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise socket.timeout
+                sock.settimeout(remaining)
+                packet, address = sock.recvfrom(4096)
+                if address[0] != expected_ip or len(packet) < 12:
+                    continue
+                frame = bytearray(packet)
+                if frame[0:2] != b"\x10\x81" or frame[2:4] != transaction_id:
+                    continue
+                break
     except (socket.timeout, TimeoutError) as error:
-        raise ConnectionError(f"Inget svar från {host}:3610. Kontrollera att ECHONET Lite är aktiverat och att adaptern finns på samma lokala nätverk.") from error
-    except ConnectionError:
-        raise
+        raise ConnectionError(f"Inget svar från {host}:3610/udp. Kontrollera att ECHONET Lite är aktiverat och att adaptern finns på samma lokala nätverk.") from error
     except OSError as error:
-        raise ConnectionError(f"Kunde inte ansluta till {host}:3610. Kontrollera att adaptern stöder ECHONET Lite och att funktionen är aktiverad i Mitsubishi-appen.") from error
+        raise ConnectionError(f"Kunde inte använda ECHONET Lite via UDP-port 3610 mot {host}. Kontrollera att adaptern stöder protokollet och att funktionen är aktiverad i Mitsubishi-appen. En annan ECHONET-klient kan redan använda porten.") from error
 
     if frame[10] not in (0x71, 0x72):
         if frame[10] in (0x51, 0x52):
@@ -744,8 +741,12 @@ def echonet_exchange(host, instance, service, properties):
     result = {}
     cursor = 12
     for _ in range(frame[11]):
+        if cursor + 2 > len(frame):
+            raise ConnectionError("Mitsubishi-adaptern skickade ett ofullständigt ECHONET Lite-svar.")
         code, length = frame[cursor], frame[cursor + 1]
         cursor += 2
+        if cursor + length > len(frame):
+            raise ConnectionError("Mitsubishi-adaptern skickade ett ofullständigt ECHONET Lite-svar.")
         result[code] = bytes(frame[cursor : cursor + length])
         cursor += length
     return result
@@ -814,26 +815,26 @@ def mitsubishi_echonet_command(payload):
     connection = (payload.get("device") or {}).get("connection") or {}
     instance = int(connection.get("instance") or 1)
     action, value = payload.get("action"), payload.get("value")
-    property_value = None
+    properties = []
     if action == "power":
-        property_value = (0x80, b"\x30" if value == "on" else b"\x31")
+        properties = [(0x80, b"\x30" if value == "on" else b"\x31")]
     elif action == "temperature":
         target = max(16, min(31, round(float(value))))
-        property_value = (0xB3, bytes((target,)))
+        properties = [(0xB3, bytes((target,)))]
     elif action == "mode":
         modes = {"auto": 0x41, "cool": 0x42, "heat": 0x43, "dry": 0x44, "fan": 0x45}
         if str(value) not in modes:
             raise ValueError("Det valda driftläget stöds inte av ECHONET Lite.")
-        property_value = (0xB0, bytes((modes[str(value)],)))
+        properties = [(0x80, b"\x30"), (0xB0, bytes((modes[str(value)],)))]
     elif action == "fan":
         fans = {"auto": 0x41, "low": 0x31, "medium": 0x35, "high": 0x38}
         if str(value) not in fans:
             raise ValueError("Den valda fläkthastigheten stöds inte av ECHONET Lite.")
-        property_value = (0xA0, bytes((fans[str(value)],)))
+        properties = [(0xA0, bytes((fans[str(value)],)))]
     elif action != "status":
         raise ValueError(f"Mitsubishi ECHONET Lite-kommandot stöds inte: {action}")
-    if property_value:
-        echonet_exchange(host, instance, 0x61, [property_value])
+    if properties:
+        echonet_exchange(host, instance, 0x61, properties)
     return echonet_unit_state(host, instance, payload.get("profileId"))
 
 

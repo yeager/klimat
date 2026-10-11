@@ -24,14 +24,14 @@ The Mitsubishi Electric ECHONET Lite adapter uses the manufacturer's documented 
 
 ## Download
 
-The [Build desktop installers workflow](https://github.com/yeager/klimat/actions/workflows/build.yml?query=branch%3Amain) builds separate artifacts for:
+Download the [Klimat 0.1.5 early access release](https://github.com/yeager/klimat/releases/tag/v0.1.5). It includes:
 
-- `klimat-linux-x64`: Linux x64 `.deb` and `.rpm`
-- `klimat-macos-x64`: Intel Mac `.dmg`
-- `klimat-macos-arm64`: Apple Silicon `.dmg`
-- `klimat-windows-x64`: Windows x64 `.msi` and NSIS `.exe`
+- Linux x64 `.deb` and `.rpm`
+- Intel Mac `.dmg` and Apple Silicon `.dmg`
+- Windows x64 `.msi` and NSIS `.exe`
+- `THIRD_PARTY_LICENSES.txt`
 
-Open a successful workflow run and download the artifact for your operating system and architecture. These are unsigned development builds; macOS packages are not notarized. Physical-device support and signed production releases remain to be verified.
+The [Build desktop installers workflow](https://github.com/yeager/klimat/actions/workflows/build.yml?query=branch%3Amain) produces fresh artifacts for each platform. These are unsigned development builds; macOS packages are not notarized. Physical-device support remains to be verified across supported models.
 
 ## Tray behavior
 

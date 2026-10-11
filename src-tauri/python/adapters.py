@@ -12,7 +12,7 @@ def climate_device(device, brand, kind):
         "target": getattr(device, "target_temperature", 22) or 22,
         "current": getattr(device, "room_temperature", getattr(device, "current_temperature", 0)) or 0,
         "mode": {"heat_cool": "auto", "fan_only": "fan"}.get(operation_mode, operation_mode),
-        "fan": str(getattr(device, "fan_speed", "auto")).lower(),
+        "fan": normalize_melcloud_fan(device),
     }
 
 
@@ -22,10 +22,10 @@ async def melcloud_connect(payload):
 
     async with aiohttp.ClientSession() as session:
         try:
-            client = await pymelcloud.login(payload["username"], payload["password"], session=session)
+            token = await pymelcloud.login(payload["username"], payload["password"], session=session)
         except (AttributeError, KeyError, TypeError) as error:
             raise ValueError("MELCloud-inloggningen misslyckades. Kontrollera e-postadress och lösenord.") from error
-        devices = await client.get_devices()
+        devices = await pymelcloud.get_devices(token, session=session)
         result = []
         for group in devices.values():
             for device in group:
@@ -86,10 +86,10 @@ async def melcloud_restore(payload):
         raise ValueError("MELCloud-uppgifter saknas i systemets nyckelring. Anslut kontot igen.")
     async with aiohttp.ClientSession() as session:
         try:
-            client = await pymelcloud.login(profile["username"], profile["password"], session=session)
+            token = await pymelcloud.login(profile["username"], profile["password"], session=session)
         except (AttributeError, KeyError, TypeError) as error:
             raise ValueError("MELCloud kunde inte logga in. Kontrollera kontot i inställningarna.") from error
-        devices = await client.get_devices()
+        devices = await pymelcloud.get_devices(token, session=session)
         result = []
         for group in devices.values():
             for device in group:
@@ -111,16 +111,26 @@ async def melcloud_command(payload):
         if not active:
             raise ValueError("MELCloud-sessionen saknas. Anslut kontot igen.")
         try:
-            client = await pymelcloud.login(active["username"], active["password"], session=session)
+            token = await pymelcloud.login(active["username"], active["password"], session=session)
         except (AttributeError, KeyError, TypeError) as error:
             raise ValueError("MELCloud-inloggningen misslyckades. Kontrollera kontot och anslut igen.") from error
-        devices = await client.get_devices()
+        devices = await pymelcloud.get_devices(token, session=session)
         device = next((d for group in devices.values() for d in group if str(d.device_id) == str(payload["device"]["id"])), None)
         if device is None:
             raise ValueError("Enheten hittades inte i MELCloud-kontot.")
         action, value = payload["action"], payload.get("value")
         mode = {"cool": "cool", "heat": "heat", "auto": "heat_cool", "dry": "dry", "fan": "fan_only"}.get(str(value), value)
-        fan = {"auto": "auto", "low": "1", "medium": "2", "high": "3"}.get(str(value), value)
+        fan = None
+        if action == "fan":
+            if value == "auto":
+                fan = "auto"
+            else:
+                available = [str(speed) for speed in (device.fan_speeds or []) if str(speed).lower() != "auto"]
+                if available:
+                    index = {"low": 0, "medium": (len(available) - 1) // 2, "high": len(available) - 1}.get(str(value))
+                    fan = available[index] if index is not None else str(value)
+                else:
+                    fan = {"low": "1", "medium": "2", "high": "3"}.get(str(value), value)
         properties = {"power": value == "on"} if action == "power" else {"target_temperature": float(value)} if action == "temperature" else {"operation_mode": mode} if action == "mode" else {"fan_speed": fan} if action == "fan" else {}
         if not properties:
             raise ValueError(f"Unsupported MELCloud command: {action}")
@@ -167,6 +177,21 @@ def normalize_midea_fan(value):
     if fan in {"high", "full", "full_speed"}:
         return "high"
     return "auto"
+
+
+def normalize_melcloud_fan(device):
+    current = str(getattr(device, "fan_speed", "auto") or "auto").lower()
+    if current == "auto":
+        return "auto"
+    available = [str(speed).lower() for speed in (getattr(device, "fan_speeds", None) or []) if str(speed).lower() != "auto"]
+    try:
+        index = available.index(current)
+    except ValueError:
+        return "auto"
+    if len(available) <= 1:
+        return "medium"
+    position = index / (len(available) - 1)
+    return "low" if position < 1 / 3 else "medium" if position < 2 / 3 else "high"
 
 
 async def handle(payload):

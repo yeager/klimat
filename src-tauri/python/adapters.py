@@ -71,7 +71,7 @@ def melcloud_login_error(error):
     import aiohttp
 
     if isinstance(error, aiohttp.ClientResponseError):
-        if error.status in {401, 403}:
+        if error.status in {400, 401, 403}:
             return ValueError("MELCloud nekade inloggningen. Kontrollera e-postadress och lösenord i MELCloud-appen eller på webben.")
         if error.status == 429:
             return ValueError("MELCloud begränsar tillfälligt inloggningar. Vänta en stund och försök igen.")
@@ -87,9 +87,12 @@ async def melcloud_login(pymelcloud, session, username, password):
     import aiohttp
 
     try:
-        return await pymelcloud.login(username, password, session=session)
+        token = await pymelcloud.login(username, password, session=session)
     except (aiohttp.ClientError, TimeoutError, AttributeError, KeyError, TypeError) as error:
         raise melcloud_login_error(error) from error
+    if not isinstance(token, str) or not token.strip():
+        raise ValueError("MELCloud bekräftade inte inloggningen. Kontrollera e-postadress och lösenord i MELCloud-appen eller på webben.")
+    return token
 
 
 async def melcloud_connect(payload):

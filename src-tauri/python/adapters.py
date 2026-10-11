@@ -32,9 +32,14 @@ def temperature_step(device, attribute, default):
         return default
 
 
+def normalize_operation_mode(value):
+    mode = str(value or "").lower()
+    return {"heat_cool": "auto", "fan_only": "fan"}.get(mode, mode)
+
+
 def climate_device(device, brand, kind):
-    operation_mode = str(getattr(device, "operation_mode", "cool") or "cool").lower()
-    return {
+    operation_mode = normalize_operation_mode(getattr(device, "operation_mode", "cool"))
+    item = {
         "id": str(getattr(device, "device_id", getattr(device, "id", ""))),
         "name": getattr(device, "name", None) or f"{brand} AC",
         "brand": brand,
@@ -43,9 +48,16 @@ def climate_device(device, brand, kind):
         "target": getattr(device, "target_temperature", 22) or 22,
         "temperatureStep": temperature_step(device, "temperature_increment", 0.5),
         "current": getattr(device, "room_temperature", getattr(device, "current_temperature", 0)) or 0,
-        "mode": {"heat_cool": "auto", "fan_only": "fan"}.get(operation_mode, operation_mode),
+        "mode": operation_mode,
         "fan": normalize_melcloud_fan(device),
     }
+    supported = getattr(device, "operation_modes", None)
+    if supported:
+        item["availableModes"] = list(dict.fromkeys(
+            mode for mode in (normalize_operation_mode(value) for value in supported)
+            if mode in {"auto", "cool", "heat", "dry", "fan"}
+        ))
+    return item
 
 
 async def melcloud_connect(payload):
@@ -112,6 +124,10 @@ def midea_connect(payload):
                 "temperatureStep": temperature_step(device, "temperature_step", 0.5),
                 "current": device.get_attribute("indoor_temperature") or 0,
                 "mode": {"heat": "heat", "cool": "cool", "auto": "auto", "dry": "dry", "fan_only": "fan"}.get(device.raw_hvac_mode() or "cool", "cool"),
+                "availableModes": list(dict.fromkeys(
+                    mode for mode in (normalize_operation_mode(value) for value in (device.raw_hvac_modes or []))
+                    if mode in {"auto", "cool", "heat", "dry", "fan"}
+                )),
                 "fan": normalize_midea_fan(device.raw_fan_mode()),
                 "connection": {key: value for key, value in details.items() if key not in {"token", "key"}} | {"profile_id": payload["id"]},
             })

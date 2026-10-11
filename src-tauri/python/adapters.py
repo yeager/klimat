@@ -84,10 +84,13 @@ def melcloud_login_error(error):
 
 
 async def melcloud_login(pymelcloud, session, username, password):
+    import asyncio
     import aiohttp
 
     try:
-        token = await pymelcloud.login(username, password, session=session)
+        token = await asyncio.wait_for(
+            pymelcloud.login(username, password, session=session), timeout=10
+        )
     except (aiohttp.ClientError, TimeoutError, AttributeError, KeyError, TypeError) as error:
         raise melcloud_login_error(error) from error
     if not isinstance(token, str) or not token.strip():

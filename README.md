@@ -9,6 +9,8 @@
 - Tray-first popup for macOS, Windows, and Linux desktops.
 - Mitsubishi Electric devices through the MELCloud cloud service.
 - Midea and compatible devices over the local network.
+- Up to six AC units, with a compact manufacturer picker and a generated Klimat icon for every listed manufacturer.
+- Native app icons for Linux packages, the macOS app, and Windows installers.
 - Power, temperature setpoint, cool/heat/auto/dry/fan modes, and fan speed.
 - Credentials and device keys stored in the operating system keychain.
 - Interface translated into 20 languages, including Swedish. The system language is detected on first launch; the language selector can override it.

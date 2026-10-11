@@ -46,7 +46,7 @@ pnpm build:adapter
 pnpm tauri build
 ```
 
-Build installers on the target OS. A GitHub Actions workflow is configured for Linux x64, macOS x64/arm64, and Windows x64. A successful workflow run and a physical-device check are required before calling those platform releases verified.
+Build installers on the target OS. The GitHub Actions matrix targets Linux x64 (`.deb` and `.rpm`), macOS Intel (`.dmg`), macOS Apple Silicon (`.dmg`), and Windows x64 (`.msi` and NSIS `.exe`). Each platform/architecture is uploaded as a separate workflow artifact. A successful workflow run and a physical-device check are required before calling those platform releases verified.
 
 ## Localization
 

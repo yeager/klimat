@@ -2,13 +2,14 @@
 
 **A compact, cross-platform air-conditioner controller that lives in the system tray.** Klimat is built with Tauri, Rust, React, and TypeScript. Its small popup keeps the essential controls close at hand: power, room temperature, target temperature, operating mode, and fan speed.
 
-> Klimat is an early prototype. MELCloud and Midea-compatible adapters are implemented, but physical-device validation and Linux/Windows release validation are still outstanding.
+> Klimat is an early prototype. MELCloud, Midea-compatible, Daikin, and Gree adapters are implemented; control with physical units still needs validation.
 
 ## Features
 
 - Tray-first popup for macOS, Windows, and Linux desktops.
 - Mitsubishi Electric devices through the MELCloud cloud service.
 - Midea and compatible devices over the local network.
+- Gree devices over the local network, with automatic discovery and pairing.
 - Daikin units with compatible local Wi-Fi adapters, including common BRP069 models.
 - Up to six AC units, with a compact manufacturer picker and a generated Klimat icon for every listed manufacturer.
 - Native app icons for Linux `.desktop` entries and packages, macOS app bundles, and Windows installers.
@@ -22,11 +23,12 @@
 | Connection | Status | Notes |
 | --- | --- | --- |
 | Mitsubishi Electric MELCloud | Implemented, needs device validation | Uses a standalone MELCloud client library. |
-| Midea-compatible local control | Implemented, needs device validation | Device model, credentials, and network setup affect compatibility. |
+| Midea, compatible Comfee and Toshiba Lifestyle models | Implemented, needs device validation | Device model, credentials, and network setup affect compatibility. |
 | Daikin local | Implemented, needs device validation | Manual IP setup for compatible adapters exposing Daikin's local HTTP API. Cloud-only models and newer authenticated adapters are not covered. |
-| MELCloud Home, LG ThinQ, Gree, network IR | Planned | The adapter interface is intended to support additional providers. |
+| Gree local | Implemented, needs device validation | Discovers and pairs supported units over UDP on the local network. |
+| MELCloud Home, LG ThinQ, network IR | Planned | The adapter interface is intended to support additional providers. |
 
-The current MELCloud adapter uses the upstream `python-melcloud` client. Local Midea control uses `midea-local`. Daikin support uses its local HTTP API directly. These adapters run without a Home Assistant runtime or server.
+The MELCloud adapter uses the upstream `python-melcloud` client. Local Midea control uses `midea-local`; Gree control uses the MIT-licensed `gree-climate` Rust crate; Daikin support uses its local HTTP API directly. These adapters run without a Home Assistant runtime or server.
 
 ## Tray behavior
 
@@ -60,14 +62,14 @@ Translations live in `src/i18n.ts`. Each locale uses the same ordered message ke
 
 ## Security and privacy
 
-- MELCloud credentials and Midea keys are passed to the OS keychain by the Rust application.
+- MELCloud credentials, Midea keys, and Gree pairing keys are stored in the OS keychain by the Rust application.
 - Device names and connection profiles are stored locally by the app.
 - Cloud control requires access to the relevant manufacturer's service. Local control requires network access to the device.
 - Never commit real account credentials, device tokens, or keys. Run [Gitleaks](https://github.com/gitleaks/gitleaks) before publishing changes.
 
 ## License and third-party notices
 
-Klimat is currently distributed without a project license file. Until a license is added, do not assume the source is available for reuse. Bundled adapter builds collect third-party license notices in `THIRD_PARTY_LICENSES.txt`. Review the licenses of `python-melcloud`, `midea-local`, and their transitive dependencies before redistributing a release. Home Assistant Core is Apache-2.0; if source code is copied from it, retain the required notices and license terms.
+Klimat is currently distributed without a project license file. Until a license is added, do not assume the source is available for reuse. Bundled adapter builds collect third-party license notices in `THIRD_PARTY_LICENSES.txt`, including the `gree-climate` MIT license. Review the licenses of `python-melcloud`, `midea-local`, and their transitive dependencies before redistributing a release. Home Assistant Core is Apache-2.0; if source code is copied from it, retain the required notices and license terms.
 
 ## Contributing
 

@@ -9,6 +9,7 @@ from packaging.requirements import Requirement
 ROOTS = ("python-melcloud", "midea-local", "aiohttp")
 LICENSE_NAMES = ("license", "copying", "notice", "copyright")
 OUTPUT = Path(__file__).parent / "dist" / "THIRD_PARTY_LICENSES.txt"
+GREE_LICENSE = Path(__file__).parent.parent / "licenses" / "gree-climate-MIT.txt"
 
 
 def main() -> None:
@@ -57,6 +58,9 @@ def main() -> None:
         else:
             license_name = distribution.metadata.get("License-Expression") or distribution.metadata.get("License") or "License not stated in package metadata"
             sections.append(f"License metadata: {license_name}")
+
+    if GREE_LICENSE.is_file():
+        sections.extend(["", "gree-climate 0.1.0", "------------------", GREE_LICENSE.read_text(encoding="utf-8").strip()])
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text("\n".join(sections).rstrip() + "\n", encoding="utf-8")

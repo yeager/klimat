@@ -13,12 +13,23 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
+mod gree;
+
 static SECRET_PROFILES: OnceLock<Mutex<HashMap<String, Value>>> = OnceLock::new();
 static ADAPTER_DIR: OnceLock<PathBuf> = OnceLock::new();
 static ADAPTER_BINARY: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 #[tauri::command]
-fn climate_request(payload: Value) -> Result<Value, String> {
+async fn climate_request(payload: Value) -> Result<Value, String> {
+    if payload.get("brand").and_then(Value::as_str) == Some("gree") {
+        return gree::request(&payload).await;
+    }
+    tauri::async_runtime::spawn_blocking(move || climate_request_blocking(payload))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn climate_request_blocking(payload: Value) -> Result<Value, String> {
     let profiles = payload
         .get("profiles")
         .cloned()

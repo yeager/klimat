@@ -9,8 +9,9 @@
 - Tray-first popup for macOS, Windows, and Linux desktops.
 - Mitsubishi Electric devices through the MELCloud cloud service.
 - Midea and compatible devices over the local network.
+- Daikin units with compatible local Wi-Fi adapters, including common BRP069 models.
 - Up to six AC units, with a compact manufacturer picker and a generated Klimat icon for every listed manufacturer.
-- Native app icons for Linux packages, the macOS app, and Windows installers.
+- Native app icons for Linux `.desktop` entries and packages, macOS app bundles, and Windows installers.
 - Power, temperature setpoint, cool/heat/auto/dry/fan modes, and fan speed.
 - Credentials and device keys stored in the operating system keychain.
 - Interface translated into 20 languages, including Swedish. The system language is detected on first launch; the language selector can override it.
@@ -22,9 +23,10 @@
 | --- | --- | --- |
 | Mitsubishi Electric MELCloud | Implemented, needs device validation | Uses a standalone MELCloud client library. |
 | Midea-compatible local control | Implemented, needs device validation | Device model, credentials, and network setup affect compatibility. |
-| Daikin local, MELCloud Home, LG ThinQ, network IR | Planned | The adapter interface is intended to support additional providers. |
+| Daikin local | Implemented, needs device validation | Manual IP setup for compatible adapters exposing Daikin's local HTTP API. Cloud-only models and newer authenticated adapters are not covered. |
+| MELCloud Home, LG ThinQ, Gree, network IR | Planned | The adapter interface is intended to support additional providers. |
 
-The current MELCloud adapter uses the upstream `python-melcloud` client. Local Midea control uses `midea-local`. These are independent client libraries; no Home Assistant runtime or server is bundled.
+The current MELCloud adapter uses the upstream `python-melcloud` client. Local Midea control uses `midea-local`. Daikin support uses its local HTTP API directly. These adapters run without a Home Assistant runtime or server.
 
 ## Tray behavior
 

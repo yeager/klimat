@@ -1,4 +1,11 @@
-"""Climate adapters using the same client libraries as Home Assistant Core."""
+"""Standalone climate adapters, with Home Assistant used as a protocol reference."""
+
+from urllib.parse import parse_qsl, unquote
+
+
+DAIKIN_MODES = {"0": "auto", "1": "auto", "2": "dry", "3": "cool", "4": "heat", "6": "fan", "7": "auto"}
+DAIKIN_MODE_VALUES = {"auto": "0", "cool": "3", "heat": "4", "dry": "2", "fan": "6"}
+MIDEA_BRANDS = {"midea", "comfee", "toshiba-lifestyle"}
 
 
 def climate_device(device, brand, kind):
@@ -141,6 +148,109 @@ async def melcloud_command(payload):
         return result
 
 
+async def daikin_request(base_url, path, params=None):
+    import aiohttp
+
+    timeout = aiohttp.ClientTimeout(total=5)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        try:
+            async with session.request(
+                "POST" if params is not None else "GET",
+                f"{base_url}/{path}",
+                data=params,
+            ) as response:
+                response.raise_for_status()
+                body = await response.text()
+                values = dict(parse_qsl(body.replace(",", "&"), keep_blank_values=True))
+        except (aiohttp.ClientError, TimeoutError) as error:
+            raise ConnectionError(f"Kunde inte nå Daikin-enheten på {base_url}: {error}") from error
+    if values.get("ret") not in (None, "OK"):
+        raise ValueError(f"Daikin-enheten avvisade kommandot: {values['ret']}")
+    return values
+
+
+async def daikin_read(payload):
+    endpoint = str(payload.get("endpoint") or "").strip().rstrip("/")
+    if not endpoint:
+        raise ValueError("Ange Daikin-enhetens IP-adress.")
+    if "://" not in endpoint:
+        endpoint = f"http://{endpoint}"
+    if not endpoint.startswith(("http://", "https://")):
+        raise ValueError("Daikin-adressen måste använda HTTP eller HTTPS.")
+    profile_id = str(payload.get("id") or payload.get("profileId") or "")
+    control = await daikin_request(endpoint, "aircon/get_control_info")
+    sensor = await daikin_request(endpoint, "aircon/get_sensor_info")
+    info = {}
+    try:
+        info = await daikin_request(endpoint, "common/basic_info")
+    except (ConnectionError, ValueError):
+        pass
+    raw_mode = control.get("mode", "0")
+    device_id = info.get("mac") or info.get("id") or endpoint
+    return {
+        "id": str(device_id),
+        "name": unquote(info.get("name", "")).strip() or "Daikin AC",
+        "brand": "daikin",
+        "kind": "direct",
+        "state": "on" if control.get("pow") == "1" else "off",
+        "target": daikin_temperature(control.get("stemp"), 22),
+        "current": daikin_temperature(sensor.get("htemp"), 0),
+        "mode": DAIKIN_MODES.get(raw_mode, "auto"),
+        "fan": daikin_fan(control.get("f_rate", "A")),
+        "connection": {"profile_id": profile_id, "endpoint": endpoint},
+    }
+
+
+def daikin_fan(value):
+    if str(value).upper() == "A":
+        return "auto"
+    try:
+        speed = int(value)
+    except (TypeError, ValueError):
+        return "auto"
+    return "low" if speed <= 3 else "medium" if speed <= 5 else "high"
+
+
+def daikin_temperature(value, fallback):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+async def daikin_connect(payload):
+    return {"devices": [await daikin_read(payload)], "profile": {}}
+
+
+async def daikin_restore(payload):
+    profile = next((entry for entry in payload.get("profiles", []) if entry.get("id") == payload.get("id")), None)
+    if not profile or not profile.get("endpoint"):
+        raise ValueError("Daikin-enhetens IP-adress saknas. Anslut enheten igen.")
+    return await daikin_connect({**profile, **payload})
+
+
+async def daikin_command(payload):
+    active = next((entry for entry in payload.get("profiles", []) if entry.get("id") == payload.get("profileId")), None)
+    endpoint = (payload.get("device", {}).get("connection") or {}).get("endpoint") or (active or {}).get("endpoint")
+    if not endpoint:
+        raise ValueError("Daikin-enhetens IP-adress saknas. Anslut enheten igen.")
+    control = await daikin_request(endpoint, "aircon/get_control_info")
+    action, value = payload.get("action"), payload.get("value")
+    params = {key: control.get(key, default) for key, default in (("pow", "0"), ("mode", "0"), ("stemp", "22"), ("shum", "0"), ("f_rate", "A"), ("f_dir", "0"))}
+    if action == "power":
+        params["pow"] = "1" if value == "on" else "0"
+    elif action == "temperature":
+        params["stemp"] = f"{float(value):g}"
+    elif action == "mode":
+        params["mode"] = DAIKIN_MODE_VALUES.get(str(value), "0")
+    elif action == "fan":
+        params["f_rate"] = {"auto": "A", "low": "3", "medium": "5", "high": "7"}.get(str(value), "A")
+    else:
+        raise ValueError(f"Daikin-kommandot stöds inte: {action}")
+    await daikin_request(endpoint, "aircon/set_control_info", params)
+    return await daikin_read({"endpoint": endpoint, "profileId": payload.get("profileId")})
+
+
 def midea_command(payload):
     from midealocal.const import ProtocolVersion
     from midealocal.devices import device_selector
@@ -199,13 +309,23 @@ async def handle(payload):
     if action == "discover":
         if brand == "melcloud":
             return await melcloud_connect(payload)
-        return midea_connect(payload)
+        if brand == "daikin":
+            return await daikin_connect(payload)
+        if brand in MIDEA_BRANDS:
+            return midea_connect(payload)
+        raise ValueError(f"Integrationen {brand} stöds inte ännu.")
     if action == "restore":
         if brand == "melcloud":
             return await melcloud_restore(payload)
-        return midea_connect(payload)
+        if brand == "daikin":
+            return await daikin_restore(payload)
+        if brand in MIDEA_BRANDS:
+            return midea_connect(payload)
+        raise ValueError(f"Integrationen {brand} stöds inte ännu.")
     if brand == "melcloud":
         return await melcloud_command(payload)
-    if brand == "midea":
+    if brand == "daikin":
+        return await daikin_command(payload)
+    if brand in MIDEA_BRANDS:
         return midea_command(payload)
     raise ValueError(f"Integrationen {brand} stöds inte ännu.")

@@ -44,6 +44,11 @@ function App() {
   useEffect(() => { localStorage.setItem("klimat-devices", JSON.stringify(devices)); }, [devices]);
   useEffect(() => { localStorage.setItem("klimat-language", language); }, [language]);
   useEffect(() => {
+    if (!message || showAdd) return;
+    const timeout = window.setTimeout(() => setMessage(""), 3500);
+    return () => window.clearTimeout(timeout);
+  }, [message, showAdd]);
+  useEffect(() => {
     if (restored || !profiles.length) { setRestored(true); return; }
     let cancelled = false;
     (async () => {

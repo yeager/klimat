@@ -51,6 +51,12 @@ def climate_device(device, brand, kind):
         "mode": operation_mode,
         "fan": normalize_melcloud_fan(device),
     }
+    minimum = getattr(device, "target_temperature_min", None)
+    maximum = getattr(device, "target_temperature_max", None)
+    if minimum is not None:
+        item["minTarget"] = minimum
+    if maximum is not None:
+        item["maxTarget"] = maximum
     supported = getattr(device, "operation_modes", None)
     if supported:
         item["availableModes"] = list(dict.fromkeys(
@@ -60,15 +66,38 @@ def climate_device(device, brand, kind):
     return item
 
 
+def melcloud_login_error(error):
+    """Turn common MELCloud authentication failures into actionable messages."""
+    import aiohttp
+
+    if isinstance(error, aiohttp.ClientResponseError):
+        if error.status in {401, 403}:
+            return ValueError("MELCloud nekade inloggningen. Kontrollera e-postadress och lösenord i MELCloud-appen eller på webben.")
+        if error.status == 429:
+            return ValueError("MELCloud begränsar tillfälligt inloggningar. Vänta en stund och försök igen.")
+        return ValueError(f"MELCloud svarade med HTTP {error.status}. Försök igen senare.")
+    if isinstance(error, aiohttp.ClientError) or isinstance(error, TimeoutError):
+        return ValueError("Kunde inte nå MELCloud. Kontrollera internetanslutningen och försök igen.")
+    if isinstance(error, (AttributeError, KeyError, TypeError)):
+        return ValueError("MELCloud kunde inte bekräfta inloggningen. Kontrollera att e-postadress och lösenord fungerar i MELCloud-appen eller på webben.")
+    return ValueError("MELCloud-inloggningen misslyckades. Kontrollera kontot i MELCloud-appen eller på webben.")
+
+
+async def melcloud_login(pymelcloud, session, username, password):
+    import aiohttp
+
+    try:
+        return await pymelcloud.login(username, password, session=session)
+    except (aiohttp.ClientError, TimeoutError, AttributeError, KeyError, TypeError) as error:
+        raise melcloud_login_error(error) from error
+
+
 async def melcloud_connect(payload):
     import aiohttp
     import pymelcloud
 
     async with aiohttp.ClientSession() as session:
-        try:
-            token = await pymelcloud.login(payload["username"], payload["password"], session=session)
-        except (AttributeError, KeyError, TypeError) as error:
-            raise ValueError("MELCloud-inloggningen misslyckades. Kontrollera e-postadress och lösenord.") from error
+        token = await melcloud_login(pymelcloud, session, payload["username"], payload["password"])
         devices = await pymelcloud.get_devices(token, session=session)
         result = []
         limit = device_limit(payload)
@@ -122,6 +151,8 @@ def midea_connect(payload):
                 "state": "on" if device.get_attribute("power") else "off",
                 "target": device.get_attribute("target_temperature") or 22,
                 "temperatureStep": temperature_step(device, "temperature_step", 0.5),
+                "minTarget": device.min_temperature(),
+                "maxTarget": device.max_temperature(),
                 "current": device.get_attribute("indoor_temperature") or 0,
                 "mode": {"heat": "heat", "cool": "cool", "auto": "auto", "dry": "dry", "fan_only": "fan"}.get(device.raw_hvac_mode() or "cool", "cool"),
                 "availableModes": list(dict.fromkeys(
@@ -149,10 +180,7 @@ async def melcloud_restore(payload):
     if not profile or not profile.get("username") or not profile.get("password"):
         raise ValueError("MELCloud-uppgifter saknas i systemets nyckelring. Anslut kontot igen.")
     async with aiohttp.ClientSession() as session:
-        try:
-            token = await pymelcloud.login(profile["username"], profile["password"], session=session)
-        except (AttributeError, KeyError, TypeError) as error:
-            raise ValueError("MELCloud kunde inte logga in. Kontrollera kontot i inställningarna.") from error
+        token = await melcloud_login(pymelcloud, session, profile["username"], profile["password"])
         devices = await pymelcloud.get_devices(token, session=session)
         result = []
         selected = requested_ids(payload)
@@ -182,10 +210,7 @@ async def melcloud_command(payload):
     async with aiohttp.ClientSession() as session:
         if not active:
             raise ValueError("MELCloud-sessionen saknas. Anslut kontot igen.")
-        try:
-            token = await pymelcloud.login(active["username"], active["password"], session=session)
-        except (AttributeError, KeyError, TypeError) as error:
-            raise ValueError("MELCloud-inloggningen misslyckades. Kontrollera kontot och anslut igen.") from error
+        token = await melcloud_login(pymelcloud, session, active["username"], active["password"])
         devices = await pymelcloud.get_devices(token, session=session)
         device = next((d for group in devices.values() for d in group if str(d.device_id) == str(payload["device"]["id"])), None)
         if device is None:
@@ -203,7 +228,15 @@ async def melcloud_command(payload):
                     fan = available[index] if index is not None else str(value)
                 else:
                     fan = {"low": "1", "medium": "2", "high": "3"}.get(str(value), value)
-        properties = {"power": value == "on"} if action == "power" else {"target_temperature": float(value)} if action == "temperature" else {"operation_mode": mode} if action == "mode" else {"fan_speed": fan} if action == "fan" else {}
+        target = float(value) if action == "temperature" else None
+        if target is not None:
+            minimum = getattr(device, "target_temperature_min", None)
+            maximum = getattr(device, "target_temperature_max", None)
+            if minimum is not None:
+                target = max(float(minimum), target)
+            if maximum is not None:
+                target = min(float(maximum), target)
+        properties = {"power": value == "on"} if action == "power" else {"target_temperature": target} if action == "temperature" else {"operation_mode": mode} if action == "mode" else {"fan_speed": fan} if action == "fan" else {}
         if not properties:
             raise ValueError(f"Unsupported MELCloud command: {action}")
         await device.set(properties)
@@ -222,10 +255,7 @@ async def melcloud_status(payload):
     if not active:
         raise ValueError("MELCloud-sessionen saknas. Anslut kontot igen.")
     async with aiohttp.ClientSession() as session:
-        try:
-            token = await pymelcloud.login(active["username"], active["password"], session=session)
-        except (AttributeError, KeyError, TypeError) as error:
-            raise ValueError("MELCloud-inloggningen misslyckades. Kontrollera kontot och anslut igen.") from error
+        token = await melcloud_login(pymelcloud, session, active["username"], active["password"])
         devices = await pymelcloud.get_devices(token, session=session)
         device = next((d for group in devices.values() for d in group if str(d.device_id) == str(payload["device"]["id"])), None)
         if device is None:
@@ -364,7 +394,9 @@ def midea_command(payload):
         action, value = payload["action"], payload.get("value")
         if action == "status": pass
         elif action == "power": device.turn_on() if value == "on" else device.turn_off()
-        elif action == "temperature": device.set_raw_target_temperature(float(value), None)
+        elif action == "temperature":
+            target = max(device.min_temperature(), min(device.max_temperature(), float(value)))
+            device.set_raw_target_temperature(target, None)
         elif action == "mode":
             device.set_raw_hvac_mode({"cool": "cool", "heat": "heat", "auto": "auto", "dry": "dry", "fan": "fan_only"}.get(str(value), str(value)))
         elif action == "fan":
@@ -372,7 +404,7 @@ def midea_command(payload):
         else: raise ValueError(f"Unsupported Midea command: {action}")
         device.refresh_status()
         updated_mode = {"heat": "heat", "cool": "cool", "auto": "auto", "dry": "dry", "fan_only": "fan"}.get(device.raw_hvac_mode() or "cool", "cool")
-        return {"state": "on" if device.get_attribute("power") else "off", "target": device.get_attribute("target_temperature") or 22, "current": device.get_attribute("indoor_temperature") or 0, "mode": updated_mode, "fan": normalize_midea_fan(device.raw_fan_mode())}
+        return {"state": "on" if device.get_attribute("power") else "off", "target": device.get_attribute("target_temperature") or 22, "current": device.get_attribute("indoor_temperature") or 0, "mode": updated_mode, "fan": normalize_midea_fan(device.raw_fan_mode()), "minTarget": device.min_temperature(), "maxTarget": device.max_temperature()}
     finally:
         device.close_socket()
 

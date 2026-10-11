@@ -838,6 +838,70 @@ def mitsubishi_echonet_command(payload):
     return echonet_unit_state(host, instance, payload.get("profileId"))
 
 
+def mitsubishi_local_state(controller, host, profile_id):
+    state = controller.fetch_status()
+    general = state.general
+    if general is None:
+        raise ValueError("Mitsubishi-adaptern returnerade ingen status för luftkonditioneringen.")
+    mode = {"AUTO": "auto", "HEATER": "heat", "DEHUM": "dry", "COOLER": "cool", "FAN": "fan"}.get(
+        getattr(general.drive_mode, "name", ""), "auto"
+    )
+    fan_name = getattr(general.wind_speed, "name", "AUTO")
+    fan = {"AUTO": "auto", "S1": "low", "S2": "low", "S3": "medium", "S4": "high", "FULL": "high"}.get(fan_name, "auto")
+    return {
+        "id": host,
+        "name": f"Mitsubishi Electric {host}",
+        "brand": "mitsubishi-local",
+        "kind": "direct",
+        "state": "on" if getattr(general.power_on_off, "name", "OFF") == "ON" else "off",
+        "target": general.temperature,
+        "temperatureStep": 0.5,
+        "minTarget": 16,
+        "maxTarget": 31,
+        "current": state.sensors.room_temperature if state.sensors else 0,
+        "mode": mode,
+        "fan": fan,
+        "availableModes": ["auto", "cool", "heat", "dry", "fan"],
+        "availableFans": ["low", "medium", "high"],
+        "connection": {"profile_id": profile_id, "endpoint": host},
+    }
+
+
+def mitsubishi_local_request(payload):
+    from pymitsubishi import MitsubishiController
+    from pymitsubishi.mitsubishi_parser import DriveMode, WindSpeed
+
+    host = mitsubishi_endpoint(payload)
+    profile_id = payload.get("profileId") or payload.get("id")
+    controller = MitsubishiController.create(host)
+    try:
+        action, value = payload.get("action"), payload.get("value")
+        if action in {"power", "temperature", "mode", "fan"}:
+            controller.fetch_status()
+            if action == "power":
+                controller.set_power(value == "on")
+            elif action == "temperature":
+                controller.set_temperature(max(16, min(31, float(value))))
+            elif action == "mode":
+                modes = {"auto": DriveMode.AUTO, "heat": DriveMode.HEATER, "dry": DriveMode.DEHUM, "cool": DriveMode.COOLER, "fan": DriveMode.FAN}
+                if str(value) not in modes:
+                    raise ValueError("Det valda driftläget stöds inte av Mitsubishi-adaptern.")
+                controller.set_mode(modes[str(value)])
+            elif action == "fan":
+                fans = {"auto": WindSpeed.AUTO, "low": WindSpeed.S2, "medium": WindSpeed.S3, "high": WindSpeed.FULL}
+                if str(value) not in fans:
+                    raise ValueError("Den valda fläkthastigheten stöds inte av Mitsubishi-adaptern.")
+                controller.set_fan_speed(fans[str(value)])
+        device = mitsubishi_local_state(controller, host, profile_id)
+        if action == "discover" and already_known(payload, "mitsubishi-local", device["id"]):
+            return {"devices": [], "profile": {}}
+        if action in {"discover", "restore"}:
+            return {"devices": [device][: device_limit(payload)], "profile": {}}
+        return device
+    finally:
+        controller.api.close()
+
+
 def midea_command(payload):
     from midealocal.const import ProtocolVersion
     from midealocal.devices import device_selector
@@ -896,6 +960,8 @@ def normalize_melcloud_fan(device):
 
 async def handle(payload):
     action, brand = payload.get("action"), payload.get("brand")
+    if brand == "mitsubishi-local" and action in {"status", "discover", "restore", "power", "temperature", "mode", "fan"}:
+        return mitsubishi_local_request(payload)
     if brand == "mitsubishi-echonet" and action == "status":
         return mitsubishi_echonet_connect(payload, "status")
     if brand == "mitsubishi-echonet" and action in {"power", "temperature", "mode", "fan"}:

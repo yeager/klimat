@@ -21,12 +21,92 @@ static ADAPTER_BINARY: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 #[tauri::command]
 async fn climate_request(payload: Value) -> Result<Value, String> {
+    if payload.get("action").and_then(Value::as_str) == Some("forget") {
+        return tauri::async_runtime::spawn_blocking(move || forget_device_blocking(payload))
+            .await
+            .map_err(|error| error.to_string())?;
+    }
     if payload.get("brand").and_then(Value::as_str) == Some("gree") {
         return gree::request(&payload).await;
     }
     tauri::async_runtime::spawn_blocking(move || climate_request_blocking(payload))
         .await
         .map_err(|error| error.to_string())?
+}
+
+fn forget_device_blocking(payload: Value) -> Result<Value, String> {
+    let profile_id = payload
+        .get("profileId")
+        .and_then(Value::as_str)
+        .ok_or("Anslutningsprofilen saknas.")?;
+    let device_id = payload
+        .pointer("/device/id")
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| value.to_string())
+        })
+        .ok_or("Enheten saknas.")?;
+    let brand = payload
+        .get("brand")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let storage_id = if brand == "gree" {
+        format!("{profile_id}-gree-devices")
+    } else {
+        format!("{profile_id}-devices")
+    };
+    let entry = keyring::Entry::new("Klimat", &storage_id).map_err(|error| error.to_string())?;
+    match entry.get_password() {
+        Ok(text) => {
+            let mut saved: Vec<Value> = serde_json::from_str(&text)
+                .map_err(|error| format!("Kunde inte läsa enhetens sparade anslutning: {error}"))?;
+            saved.retain(|item| {
+                item.get("id")
+                    .map(|value| {
+                        value
+                            .as_str()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| value.to_string())
+                    })
+                    .as_deref()
+                    != Some(device_id.as_str())
+            });
+            let text = serde_json::to_string(&saved).map_err(|error| error.to_string())?;
+            entry.set_password(&text).map_err(|error| {
+                format!("Kunde inte uppdatera enhetens data i nyckelringen: {error}")
+            })?;
+        }
+        Err(keyring::Error::NoEntry) => {}
+        Err(error) => return Err(format!("Kunde inte läsa systemets nyckelring: {error}")),
+    }
+
+    if payload
+        .get("deleteProfile")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        SECRET_PROFILES
+            .get_or_init(Default::default)
+            .lock()
+            .map_err(|error| error.to_string())?
+            .remove(profile_id);
+        for key in [
+            profile_id.to_owned(),
+            format!("{profile_id}-devices"),
+            format!("{profile_id}-gree-devices"),
+        ] {
+            let entry = keyring::Entry::new("Klimat", &key).map_err(|error| error.to_string())?;
+            match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => {}
+                Err(error) => {
+                    return Err(format!("Kunde inte rensa systemets nyckelring: {error}"));
+                }
+            }
+        }
+    }
+    Ok(Value::Null)
 }
 
 fn climate_request_blocking(payload: Value) -> Result<Value, String> {

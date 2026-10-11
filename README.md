@@ -8,7 +8,7 @@
 
 - Tray-first popup for macOS, Windows, and Linux desktops.
 - Mitsubishi Electric devices through the MELCloud cloud service.
-- Midea and compatible devices over the local network.
+- Midea and compatible devices over the local network, with broadcast discovery or a manually supplied IP address.
 - Gree devices over the local network, with automatic discovery and pairing.
 - Daikin units with compatible local Wi-Fi adapters, including common BRP069 models.
 - Up to six AC units, with a compact manufacturer picker and a distinct generated SVG icon for each provider.
@@ -25,7 +25,7 @@
 | Connection | Status | Notes |
 | --- | --- | --- |
 | Mitsubishi Electric MELCloud | Implemented, needs device validation | Uses a standalone MELCloud client library. |
-| Midea, compatible Comfee and Toshiba Lifestyle models | Implemented, needs device validation | Device model, credentials, and network setup affect compatibility. |
+| Midea, compatible Comfee and Toshiba Lifestyle models | Implemented, needs device validation | Leave the IP address blank for local network discovery, or enter it directly. Device model and network setup affect compatibility. |
 | Daikin local | Implemented, needs device validation | Manual IP setup for compatible adapters exposing Daikin's local HTTP API. Cloud-only models and newer authenticated adapters are not covered. |
 | Gree local | Implemented, needs device validation | Discovers and pairs supported units over UDP on the local network. |
 | MELCloud Home, LG ThinQ, network IR | Planned | The adapter interface is intended to support additional providers. |

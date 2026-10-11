@@ -24,7 +24,7 @@ The Mitsubishi Electric ECHONET Lite adapter uses UDP port 3610. Some Wi-Fi inte
 
 ## Download
 
-Download the [Klimat 0.1.5 early access release](https://github.com/yeager/klimat/releases/tag/v0.1.5). It includes:
+Download the [Klimat 0.1.6 early access release](https://github.com/yeager/klimat/releases/tag/v0.1.6). It includes:
 
 - Linux x64 `.deb` and `.rpm`
 - Intel Mac `.dmg` and Apple Silicon `.dmg`

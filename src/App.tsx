@@ -73,7 +73,8 @@ function App() {
       } catch { /* Keep the last known state while a device or cloud service is offline. */ }
       finally { refreshing = false; }
     };
-    const timer = window.setInterval(() => void refresh(), 30_000);
+    const pollInterval = active.brand === "melcloud" ? 15 * 60_000 : 30_000;
+    const timer = window.setInterval(() => void refresh(), pollInterval);
     document.addEventListener("visibilitychange", refresh);
     void refresh();
     return () => {

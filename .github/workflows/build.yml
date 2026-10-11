@@ -64,9 +64,34 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build installers
+      - name: Build Linux and Windows installers
+        if: runner.os != 'macOS'
         run: pnpm tauri build --bundles "${{ matrix.bundles }}"
         shell: bash
+
+      - name: Build macOS application bundle
+        if: runner.os == 'macOS'
+        run: pnpm tauri build --bundles app
+
+      - name: Package macOS disk image
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          stage="$(mktemp -d)"
+          app="src-tauri/target/release/bundle/macos/Klimat.app"
+          bundle_dir="src-tauri/target/release/bundle/dmg"
+          version="$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")"
+          case "$TARGET" in
+            macos-arm64) arch="aarch64" ;;
+            macos-x64) arch="x64" ;;
+            *) echo "Unsupported macOS target: $TARGET" >&2; exit 1 ;;
+          esac
+          mkdir -p "$bundle_dir"
+          cp -R "$app" "$stage/Klimat.app"
+          ln -s /Applications "$stage/Applications"
+          hdiutil create -volname "Klimat" -srcfolder "$stage" -ov -format UDZO "$bundle_dir/Klimat_${version}_${arch}.dmg"
 
       - uses: actions/upload-artifact@v4
         with:

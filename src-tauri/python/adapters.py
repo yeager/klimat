@@ -690,6 +690,153 @@ async def daikin_status(payload):
     return await daikin_read({"endpoint": endpoint, "profileId": payload.get("profileId")})
 
 
+def echonet_recv_exact(sock, size):
+    data = bytearray()
+    while len(data) < size:
+        chunk = sock.recv(size - len(data))
+        if not chunk:
+            raise ConnectionError("Mitsubishi-enheten stängde ECHONET Lite-anslutningen.")
+        data.extend(chunk)
+    return bytes(data)
+
+
+def echonet_exchange(host, instance, service, properties):
+    import os
+    import socket
+
+    destination = bytes((0x01, 0x30, instance))
+    transaction_id = os.urandom(2)
+    request = bytearray((0x10, 0x81))
+    request.extend(transaction_id)
+    request.extend(bytes.fromhex("05ff01"))
+    request.extend(destination)
+    request.extend((service, len(properties)))
+    for code, value in properties:
+        value = bytes(value)
+        request.extend((code, len(value)))
+        request.extend(value)
+
+    try:
+        with socket.create_connection((host, 3610), timeout=3) as sock:
+            sock.settimeout(3)
+            sock.sendall(request)
+            frame = bytearray(echonet_recv_exact(sock, 12))
+            if frame[0:2] != b"\x10\x81" or frame[2:4] != transaction_id:
+                raise ConnectionError("Mitsubishi-enheten svarade med ett ogiltigt ECHONET Lite-meddelande.")
+            count = frame[11]
+            for _ in range(count):
+                header = echonet_recv_exact(sock, 2)
+                frame.extend(header)
+                length = header[1]
+                frame.extend(echonet_recv_exact(sock, length))
+    except (socket.timeout, TimeoutError) as error:
+        raise ConnectionError(f"Inget svar från {host}:3610. Kontrollera att ECHONET Lite är aktiverat och att adaptern finns på samma lokala nätverk.") from error
+    except ConnectionError:
+        raise
+    except OSError as error:
+        raise ConnectionError(f"Kunde inte ansluta till {host}:3610. Kontrollera att adaptern stöder ECHONET Lite och att funktionen är aktiverad i Mitsubishi-appen.") from error
+
+    if frame[10] not in (0x71, 0x72):
+        if frame[10] in (0x51, 0x52):
+            raise ValueError("Mitsubishi-adaptern avvisade ECHONET Lite-förfrågan. Kontrollera att ECHONET Lite är aktiverat.")
+        raise ConnectionError(f"Mitsubishi-adaptern svarade med en okänd ECHONET Lite-tjänst: 0x{frame[10]:02x}.")
+
+    result = {}
+    cursor = 12
+    for _ in range(frame[11]):
+        code, length = frame[cursor], frame[cursor + 1]
+        cursor += 2
+        result[code] = bytes(frame[cursor : cursor + length])
+        cursor += length
+    return result
+
+
+def echonet_unit_state(host, instance=1, profile_id=None):
+    values = echonet_exchange(host, instance, 0x62, [(code, b"") for code in (0x80, 0xB0, 0xB3, 0xBB, 0xA0)])
+    if 0x80 not in values or not values[0x80] or 0xB0 not in values or not values[0xB0]:
+        raise ValueError("Mitsubishi-adaptern returnerade inte status för luftkonditioneringen.")
+    mode = {0x40: "auto", 0x41: "auto", 0x42: "cool", 0x43: "heat", 0x44: "dry", 0x45: "fan"}.get(values[0xB0][0], "auto")
+    target_data = values.get(0xB3, b"")
+    target = target_data[0] if target_data and target_data[0] not in (0x7E, 0x7F, 0x80, 0xFD) else 22
+    room_data = values.get(0xBB, b"")
+    raw_room = room_data[0] if room_data else 0
+    current = raw_room - 256 if raw_room >= 0x80 else raw_room
+    if raw_room in (0x7E, 0x7F, 0x80, 0xFD):
+        current = 0
+    fan_data = values.get(0xA0, b"")
+    raw_fan = fan_data[0] if fan_data else 0x41
+    fan = "auto" if raw_fan == 0x41 or not 0x31 <= raw_fan <= 0x38 else "low" if raw_fan <= 0x32 else "medium" if raw_fan <= 0x36 else "high"
+    return {
+        "id": f"{host}:0130{instance:02x}",
+        "name": f"Mitsubishi Electric {host}",
+        "brand": "mitsubishi-echonet",
+        "kind": "direct",
+        "state": "on" if values[0x80][0] == 0x30 else "off",
+        "target": target,
+        "temperatureStep": 1,
+        "minTarget": 16,
+        "maxTarget": 31,
+        "current": current,
+        "mode": mode,
+        "fan": fan,
+        "availableModes": ["auto", "cool", "heat", "dry", "fan"],
+        "availableFans": ["low", "medium", "high"],
+        "connection": {"profile_id": profile_id, "endpoint": host, "instance": instance},
+    }
+
+
+def mitsubishi_endpoint(payload):
+    device = payload.get("device") or {}
+    connection = device.get("connection") or {}
+    profile_id = payload.get("profileId") or payload.get("id")
+    profile = next((item for item in payload.get("profiles", []) if item.get("id") == profile_id), {})
+    endpoint = connection.get("endpoint") or profile.get("endpoint") or payload.get("endpoint")
+    if not endpoint:
+        raise ValueError("Ange Mitsubishi-adapterns IP-adress.")
+    return str(endpoint).strip().strip("[]")
+
+
+def mitsubishi_echonet_connect(payload, action="discover"):
+    host = mitsubishi_endpoint(payload)
+    profile_id = payload.get("id") or payload.get("profileId")
+    connection = (payload.get("device") or {}).get("connection") or {}
+    instance = int(connection.get("instance") or 1)
+    device = echonet_unit_state(host, instance, profile_id)
+    if action == "discover" and already_known(payload, "mitsubishi-echonet", device["id"]):
+        return {"devices": [], "profile": {}}
+    if action in {"discover", "restore"}:
+        return {"devices": [device][: device_limit(payload)], "profile": {}}
+    return device
+
+
+def mitsubishi_echonet_command(payload):
+    host = mitsubishi_endpoint(payload)
+    connection = (payload.get("device") or {}).get("connection") or {}
+    instance = int(connection.get("instance") or 1)
+    action, value = payload.get("action"), payload.get("value")
+    property_value = None
+    if action == "power":
+        property_value = (0x80, b"\x30" if value == "on" else b"\x31")
+    elif action == "temperature":
+        target = max(16, min(31, round(float(value))))
+        property_value = (0xB3, bytes((target,)))
+    elif action == "mode":
+        modes = {"auto": 0x41, "cool": 0x42, "heat": 0x43, "dry": 0x44, "fan": 0x45}
+        if str(value) not in modes:
+            raise ValueError("Det valda driftläget stöds inte av ECHONET Lite.")
+        property_value = (0xB0, bytes((modes[str(value)],)))
+    elif action == "fan":
+        fans = {"auto": 0x41, "low": 0x31, "medium": 0x35, "high": 0x38}
+        if str(value) not in fans:
+            raise ValueError("Den valda fläkthastigheten stöds inte av ECHONET Lite.")
+        property_value = (0xA0, bytes((fans[str(value)],)))
+    elif action != "status":
+        raise ValueError(f"Mitsubishi ECHONET Lite-kommandot stöds inte: {action}")
+    if property_value:
+        echonet_exchange(host, instance, 0x61, [property_value])
+    return echonet_unit_state(host, instance, payload.get("profileId"))
+
+
 def midea_command(payload):
     from midealocal.const import ProtocolVersion
     from midealocal.devices import device_selector
@@ -748,6 +895,10 @@ def normalize_melcloud_fan(device):
 
 async def handle(payload):
     action, brand = payload.get("action"), payload.get("brand")
+    if brand == "mitsubishi-echonet" and action == "status":
+        return mitsubishi_echonet_connect(payload, "status")
+    if brand == "mitsubishi-echonet" and action in {"power", "temperature", "mode", "fan"}:
+        return mitsubishi_echonet_command(payload)
     if action == "status" and brand == "melcloud":
         return await melcloud_status(payload)
     if action == "status" and brand == "melcloud-home":
@@ -757,6 +908,8 @@ async def handle(payload):
     if action == "status" and brand == "daikin":
         return await daikin_status(payload)
     if action == "discover":
+        if brand == "mitsubishi-echonet":
+            return mitsubishi_echonet_connect(payload)
         if brand == "melcloud":
             return await melcloud_connect(payload)
         if brand == "melcloud-home":
@@ -769,6 +922,8 @@ async def handle(payload):
             return midea_connect(payload)
         raise ValueError(f"Integrationen {brand} stöds inte ännu.")
     if action == "restore":
+        if brand == "mitsubishi-echonet":
+            return mitsubishi_echonet_connect(payload, action)
         if brand == "melcloud":
             return await melcloud_restore(payload)
         if brand == "melcloud-home":

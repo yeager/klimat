@@ -8,6 +8,7 @@ Klimat is an early prototype. The adapters and desktop packages build, but opera
 
 | Provider | Connection | Status and limits |
 | --- | --- | --- |
+| Mitsubishi Electric ECHONET Lite | Local network | Manual adapter IP. Requires a supported MAC-568/578/588IF-E Wi-Fi interface with ECHONET Lite enabled in the Mitsubishi app. ECHONET Lite has no built-in security; use only on a trusted local network. |
 | Mitsubishi Electric MELCloud Classic | Cloud | Email/password sign-in and power, setpoint, operating mode, and fan controls. |
 | Mitsubishi Electric MELCloud Home | Cloud | Separate service using the same account email/password and supported air-to-air controls. |
 | LG ThinQ | Cloud | Official ThinQ Connect API. Requires a Personal Access Token with air-conditioner access and the country where the LG account was created. |
@@ -19,7 +20,7 @@ You can save up to six units. The popup offers power, target temperature, cool/h
 
 MELCloud Classic and MELCloud Home are separate services; choose the one used by your unit. For LG, create a token at [LG ThinQ Connect](https://connect-pat.lgthinq.com), grant it access to air conditioners, and select the country where the LG account was registered. Credentials and tokens are kept in the operating system keychain. Do not share them in bug reports. Check that the account works in the matching official app or website before reporting a login issue.
 
-Klimat does not yet implement local ECHONET Lite. Some Mitsubishi Electric Wi-Fi interfaces support it when enabled in the manufacturer's app. The `MSZ-LN35VG2W` is also reported working over its CN105 service connector with an ESPHome-compatible adapter. That requires additional hardware connected to the indoor unit; Klimat does not control CN105 directly.
+The Mitsubishi Electric ECHONET Lite adapter uses the manufacturer's documented TCP interface on port 3610. Some Wi-Fi interfaces support it when enabled in the Mitsubishi app; availability varies by adapter and region. The `MSZ-LN35VG2W` is also reported working over its CN105 service connector with an ESPHome-compatible adapter. That requires additional hardware connected to the indoor unit; Klimat does not control CN105 directly.
 
 ## Download
 

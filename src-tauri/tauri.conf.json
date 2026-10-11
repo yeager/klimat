@@ -38,16 +38,16 @@
     "publisher": "Klimat contributors",
     "resources": ["python/adapters.py", "python/dist/"],
     "linux": {
-      "appimage": {"files": {"icons/klimat.svg": "usr/share/icons/hicolor/scalable/apps/se.klimakontroll.desktop.svg"}},
+      "appimage": {"files": {"/usr/share/icons/hicolor/scalable/apps/se.klimakontroll.desktop.svg": "icons/klimat.svg"}},
       "deb": {
         "files": {
-          "usr/share/icons/hicolor/scalable/apps/se.klimakontroll.desktop.svg": "icons/klimat.svg"
+          "/usr/share/icons/hicolor/scalable/apps/se.klimakontroll.desktop.svg": "icons/klimat.svg"
         },
         "desktopTemplate": "icons/klimat.desktop.hbs"
       },
       "rpm": {
         "files": {
-          "usr/share/icons/hicolor/scalable/apps/se.klimakontroll.desktop.svg": "icons/klimat.svg"
+          "/usr/share/icons/hicolor/scalable/apps/se.klimakontroll.desktop.svg": "icons/klimat.svg"
         },
         "desktopTemplate": "icons/klimat.desktop.hbs"
       }

@@ -2,7 +2,7 @@
 
 Klimat is a compact air-conditioner controller for Linux, macOS, and Windows. It lives in the system tray and opens a small popup for the controls used most often: power, room temperature, target temperature, operating mode, and fan speed.
 
-Klimat is an early prototype. Physical-device checks currently cover read-only status from two Mitsubishi MSZ-LN35VG2W units using the MAC-577IF-2E local Wi-Fi adapter. Command behavior still needs a controlled check before this can be considered a stable release.
+Klimat is an early prototype. On two Mitsubishi MSZ-LN35VG2W units using the MAC-577IF-2E adapter, status reads and same-value writes for power, temperature, mode, and fan all returned successfully. The writes repeated the units' existing settings; changing to new values has not yet been checked physically, so this remains an early-access release.
 
 ## Supported connections
 

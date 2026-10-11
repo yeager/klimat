@@ -45,7 +45,19 @@ async fn discover(payload: &Value) -> Result<Value, String> {
     let mut private_devices = Vec::new();
     let mut failures = Vec::new();
 
-    for info in found.into_iter().take(limit) {
+    let known = payload
+        .get("knownDevices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|device| device.get("brand").and_then(Value::as_str) == Some("gree"))
+        .filter_map(|device| device.get("id").and_then(Value::as_str))
+        .collect::<std::collections::HashSet<_>>();
+    for info in found
+        .into_iter()
+        .filter(|info| !known.contains(info.mac.as_str()))
+        .take(limit)
+    {
         let cached = saved
             .iter()
             .find(|entry| entry.get("mac").and_then(Value::as_str) == Some(info.mac.as_str()));
@@ -103,13 +115,28 @@ async fn discover(payload: &Value) -> Result<Value, String> {
             )
         });
     }
-    store_devices(profile_id, &private_devices)?;
+    let mut merged = saved;
+    for device in private_devices {
+        let mac = device.get("mac").and_then(Value::as_str);
+        merged.retain(|item| item.get("mac").and_then(Value::as_str) != mac);
+        merged.push(device);
+    }
+    store_devices(profile_id, &merged)?;
     Ok(json!({ "devices": public_devices, "profile": {} }))
 }
 
 async fn restore(payload: &Value) -> Result<Value, String> {
     let profile_id = required_string(payload, "id")?;
     let saved = load_devices(profile_id)?;
+    let selected = payload
+        .get("deviceIds")
+        .and_then(Value::as_array)
+        .map(|ids| ids.iter().filter_map(Value::as_str).collect::<Vec<_>>());
+    let limit = payload
+        .get("maxDevices")
+        .and_then(Value::as_u64)
+        .unwrap_or(6)
+        .min(6) as usize;
     if saved.is_empty() {
         return Err(
             "Gree-enhetens nyckel saknas i systemets nyckelring. Anslut enheten igen.".into(),
@@ -118,6 +145,12 @@ async fn restore(payload: &Value) -> Result<Value, String> {
     let mut devices = Vec::new();
     let mut failures = Vec::new();
     for secret in saved {
+        if selected.as_ref().is_some_and(|ids| {
+            !ids.contains(&secret.get("id").and_then(Value::as_str).unwrap_or_default())
+        }) || devices.len() >= limit
+        {
+            continue;
+        }
         let info = device_info(&secret)?;
         match connect_device(info.clone(), Some(&secret)).await {
             Ok(connection) => {

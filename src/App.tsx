@@ -48,18 +48,36 @@ function App() {
     let cancelled = false;
     (async () => {
       const recovered: Device[] = [];
+      const savedDevices = JSON.parse(localStorage.getItem("klimat-devices") || "[]") as Device[];
+      const hasSavedDevices = savedDevices.length > 0;
+      let restoreAttempts = 0;
       for (const saved of profiles) {
+        if (recovered.length >= MAX_DEVICES) break;
+        const remaining = MAX_DEVICES - (hasSavedDevices ? restoreAttempts : recovered.length);
+        if (remaining <= 0) break;
+        const profileDevices = savedDevices.filter((device) => device.profileId === saved.id);
+        const deviceIds = profileDevices.map((device) => String(device.id)).slice(0, remaining);
+        if (hasSavedDevices && !profileDevices.length) continue;
+        // Profiles without a locally cached device list can still recover up to the global limit.
+        if (savedDevices.some((device) => device.profileId === saved.id) && !deviceIds.length) continue;
+        if (hasSavedDevices) restoreAttempts += deviceIds.length;
         try {
-          const response = await invoke<{ devices: Device[] }>("climate_request", { payload: { ...saved, id: saved.id, profiles, action: "restore" } });
-          recovered.push(...response.devices.map((device) => ({ ...device, brand: saved.brand, profileId: saved.id, connection: { ...device.connection, profileId: saved.id } })));
+          const response = await invoke<{ devices: Device[] }>("climate_request", { payload: { ...saved, id: saved.id, profiles, ...(profileDevices.length ? { deviceIds } : {}), maxDevices: remaining, action: "restore" } });
+          const known = new Set(recovered.map(deviceKey));
+          recovered.push(...response.devices.map((device) => ({ ...device, brand: saved.brand, profileId: saved.id, connection: { ...device.connection, profileId: saved.id } })).filter((device) => !known.has(deviceKey(device))).slice(0, remaining));
         } catch { /* Offline devices stay saved and can be retried from settings. */ }
       }
-      if (!cancelled && recovered.length) {
+      if (!cancelled) {
         const restoredKeys = new Set(recovered.map(deviceKey));
-        const offline = (JSON.parse(localStorage.getItem("klimat-devices") || "[]") as Device[]).filter((device) => !restoredKeys.has(deviceKey(device)));
-        const unique = [...new Map([...recovered, ...offline].map((device) => [deviceKey(device), device])).values()].slice(0, MAX_DEVICES);
+        const offline = savedDevices.filter((device) => !restoredKeys.has(deviceKey(device)));
+        // Keep saved devices first so offline ones cannot be crowded out by cloud results.
+        const unique = [...new Map([...savedDevices, ...recovered].map((device) => [deviceKey(device), device])).values()].slice(0, MAX_DEVICES);
+        for (const device of recovered) {
+          const index = unique.findIndex((item) => deviceKey(item) === deviceKey(device));
+          if (index >= 0 && !offline.some((item) => deviceKey(item) === deviceKey(device))) unique[index] = device;
+        }
         setDevices(unique);
-        setSelected((current) => unique.some((device) => deviceKey(device) === current) ? current : deviceKey(unique[0]));
+        if (unique.length) setSelected((current) => unique.some((device) => deviceKey(device) === current) ? current : deviceKey(unique[0]));
       }
       if (!cancelled) setRestored(true);
     })();
@@ -96,7 +114,7 @@ function App() {
     setBusy(true); setMessage("");
     try {
       const next = { id: crypto.randomUUID(), kind: category, brand: brandId, label: chosenBrand.name, endpoint: profile.endpoint || "", region: profile.region || "eu", username: profile.username || "", password: profile.password || "", token: profile.token || "", key: profile.key || "" };
-      const response = await invoke<{ devices: Device[]; profile?: Partial<Profile> }>("climate_request", { payload: { ...next, profiles, kind: category, brand: brandId, maxDevices: MAX_DEVICES - deviceCount, action: "discover" } });
+      const response = await invoke<{ devices: Device[]; profile?: Partial<Profile> }>("climate_request", { payload: { ...next, profiles, knownDevices: devices.map(({ id, brand }) => ({ id: String(id), brand })), kind: category, brand: brandId, maxDevices: MAX_DEVICES - deviceCount, action: "discover" } });
       const knownIds = new Set(devices.map(deviceKey));
       const newDevices = response.devices.map((device) => ({ ...device, brand: brandId, profileId: next.id, connection: { ...device.connection, profileId: next.id } })).filter((device) => !knownIds.has(deviceKey(device))).slice(0, Math.max(0, MAX_DEVICES - deviceCount));
       const savedProfile: Profile = { id: next.id, kind: category, brand: brandId, label: chosenBrand.name, endpoint: next.endpoint, region: next.region };

@@ -8,6 +8,22 @@ DAIKIN_MODE_VALUES = {"auto": "0", "cool": "3", "heat": "4", "dry": "2", "fan": 
 MIDEA_BRANDS = {"midea", "comfee", "toshiba-lifestyle"}
 
 
+def device_limit(payload):
+    try:
+        return max(0, min(6, int(payload.get("maxDevices", 6))))
+    except (TypeError, ValueError):
+        return 6
+
+
+def requested_ids(payload):
+    values = payload.get("deviceIds")
+    return {str(value) for value in values} if isinstance(values, list) else None
+
+
+def already_known(payload, brand, appliance_id):
+    return any(str(item.get("id")) == str(appliance_id) and item.get("brand") == brand for item in payload.get("knownDevices", []) if isinstance(item, dict))
+
+
 def climate_device(device, brand, kind):
     operation_mode = str(getattr(device, "operation_mode", "cool") or "cool").lower()
     return {
@@ -34,13 +50,20 @@ async def melcloud_connect(payload):
             raise ValueError("MELCloud-inloggningen misslyckades. Kontrollera e-postadress och lösenord.") from error
         devices = await pymelcloud.get_devices(token, session=session)
         result = []
+        limit = device_limit(payload)
         for group in devices.values():
             for device in group:
+                if already_known(payload, "melcloud", device.device_id):
+                    continue
+                if len(result) >= limit:
+                    break
                 await device.update()
                 item = climate_device(device, "melcloud", "cloud")
                 item["id"] = str(device.device_id)
                 item["connection"] = {"profile_id": payload["id"], "serial": str(device.serial)}
                 result.append(item)
+            if len(result) >= limit:
+                break
         return {"devices": result, "profile": {}}
 
 
@@ -56,7 +79,14 @@ def midea_connect(payload):
     for appliance_id, details in found.items():
         details.update(saved_connections.get(str(appliance_id), {}))
     result = []
+    limit = device_limit(payload)
     for appliance_id, details in found.items():
+        if requested_ids(payload) is not None and str(appliance_id) not in requested_ids(payload):
+            continue
+        if already_known(payload, payload.get("brand", "midea"), appliance_id):
+            continue
+        if len(result) >= limit:
+            break
         details["token"] = payload.get("token") or details.get("token")
         details["key"] = payload.get("key") or details.get("key")
         device = device_selector(details.get("name", "Midea AC"), appliance_id, details["type"], details["ip_address"], details["port"], details.get("token", ""), details.get("key", ""), ProtocolVersion(details["protocol"]), details["model"], details.get("subtype", 0), "", details.get("mac"), details.get("sn"))
@@ -77,9 +107,10 @@ def midea_connect(payload):
             })
         finally:
             device.close_socket()
-    private_devices = []
+    private_devices = list(saved_profile.get("mideaDevices", []))
     for item in result:
         details = found[int(item["id"])]
+        private_devices = [entry for entry in private_devices if str(entry.get("id")) != item["id"]]
         private_devices.append({"id": item["id"], "connection": {**item["connection"], "token": details.get("token"), "key": details.get("key")}})
     return {"devices": result, "profile": {"mideaDevices": private_devices}}
 
@@ -98,13 +129,21 @@ async def melcloud_restore(payload):
             raise ValueError("MELCloud kunde inte logga in. Kontrollera kontot i inställningarna.") from error
         devices = await pymelcloud.get_devices(token, session=session)
         result = []
+        selected = requested_ids(payload)
+        limit = device_limit(payload)
         for group in devices.values():
             for device in group:
+                if selected is not None and str(device.device_id) not in selected:
+                    continue
+                if len(result) >= limit:
+                    break
                 await device.update()
                 item = climate_device(device, "melcloud", "cloud")
                 item["id"] = str(device.device_id)
                 item["connection"] = {"profile_id": payload["id"], "serial": str(device.serial)}
                 result.append(item)
+            if len(result) >= limit:
+                break
         return {"devices": result, "profile": {}}
 
 

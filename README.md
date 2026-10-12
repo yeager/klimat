@@ -26,18 +26,18 @@ The Mitsubishi local adapter is based on the MIT-licensed [pymitsubishi](https:/
 
 ## Download
 
-Download the latest [Klimat early access release](https://github.com/yeager/klimat/releases). It includes:
+Download [Klimat 0.1.10](https://github.com/yeager/klimat/releases/tag/v0.1.10), the current early-access release. It includes:
 
 - Linux x64 `.deb` and `.rpm`
 - Intel Mac `.dmg` and Apple Silicon `.dmg`
 - Windows x64 `.msi` and NSIS `.exe`
-- `THIRD_PARTY_LICENSES.txt`
+- `THIRD_PARTY_LICENSES.txt` and `SHA256SUMS.txt`
 
 The [Build desktop installers workflow](https://github.com/yeager/klimat/actions/workflows/build.yml?query=branch%3Amain) produces fresh artifacts for each platform. These are unsigned development builds; macOS packages are not notarized. Physical-device support remains to be verified across supported models.
 
 ## Tray behavior
 
-Klimat starts hidden and opens a small popup from its tray icon. Clicking outside or closing the popup hides it. KDE Plasma provides StatusNotifierItem support. GNOME Shell generally needs the [AppIndicator and KStatusNotifierItem Support extension](https://extensions.gnome.org/extension/615/appindicator-support/). On Wayland, popup placement is controlled by the compositor.
+Klimat starts hidden and opens a small popup from its tray icon. Clicking outside or closing the popup hides it. On macOS, Klimat runs as a menu bar utility and does not appear in the Dock; open its popup from the menu bar icon. The tray menu also includes About, with the version, project and third-party licenses, author, and a link to this repository. KDE Plasma provides StatusNotifierItem support. GNOME Shell generally needs the [AppIndicator and KStatusNotifierItem Support extension](https://extensions.gnome.org/extension/615/appindicator-support/). On Wayland, popup placement is controlled by the compositor.
 
 ## Privacy and security
 

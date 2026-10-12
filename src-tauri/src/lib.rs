@@ -8,7 +8,7 @@ use std::{
 };
 use tauri::path::BaseDirectory;
 use tauri::{
-    Manager, PhysicalPosition, Rect, WebviewWindow,
+    Emitter, Manager, PhysicalPosition, Rect, WebviewWindow,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
@@ -18,6 +18,32 @@ mod gree;
 static SECRET_PROFILES: OnceLock<Mutex<HashMap<String, Value>>> = OnceLock::new();
 static ADAPTER_DIR: OnceLock<PathBuf> = OnceLock::new();
 static ADAPTER_BINARY: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AboutInfo {
+    version: String,
+    project_license: String,
+    third_party_licenses: String,
+}
+
+#[tauri::command]
+fn about_info(app: tauri::AppHandle) -> Result<AboutInfo, String> {
+    let licenses_path = app
+        .path()
+        .resolve(
+            "python/dist/THIRD_PARTY_LICENSES.txt",
+            BaseDirectory::Resource,
+        )
+        .map_err(|error| error.to_string())?;
+    let third_party_licenses = std::fs::read_to_string(licenses_path)
+        .map_err(|error| format!("Kunde inte läsa tredjepartslicenserna: {error}"))?;
+    Ok(AboutInfo {
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        project_license: include_str!("../../LICENSE").to_owned(),
+        third_party_licenses,
+    })
+}
 
 #[tauri::command]
 async fn climate_request(payload: Value) -> Result<Value, String> {
@@ -342,7 +368,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![hide_on_close, climate_request])
+        .invoke_handler(tauri::generate_handler![hide_on_close, climate_request, about_info])
         .setup(|app| {
             let resource_dir = app.path().resolve("python", BaseDirectory::Resource)?;
             let adapter_file = resource_dir.join("adapters.py");
@@ -360,9 +386,10 @@ pub fn run() {
             let sidecar = app.path().resolve(sidecar_name, BaseDirectory::Resource)?;
             let _ = ADAPTER_BINARY.set(sidecar.is_file().then_some(sidecar));
             let open = MenuItem::with_id(app, "open", "Visa klimatkontroller", true, None::<&str>)?;
+            let about = MenuItem::with_id(app, "about", "Om Klimat", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Avsluta", true, None::<&str>)?;
             let separator = PredefinedMenuItem::separator(app)?;
-            let menu = Menu::with_items(app, &[&open, &separator, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &about, &separator, &quit])?;
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
             TrayIconBuilder::new()
                 .icon(tray_icon)
@@ -374,6 +401,13 @@ pub fn run() {
                     "open" => {
                         if let Some(window) = app.get_webview_window("main") {
                             show_popup(&window, None);
+                            let _ = app.emit("show-controls", ());
+                        }
+                    }
+                    "about" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            show_popup(&window, None);
+                            let _ = app.emit("show-about", ());
                         }
                     }
                     "quit" => app.exit(0),

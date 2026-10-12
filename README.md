@@ -2,7 +2,7 @@
 
 Klimat is a compact air-conditioner controller for Linux, macOS, and Windows. It lives in the system tray and opens a small popup for the controls used most often: power, room temperature, target temperature, operating mode, and fan speed.
 
-Klimat is an early prototype. On two Mitsubishi MSZ-LN35VG2W units using the MAC-577IF-2E adapter, status reads and same-value writes for power, temperature, mode, and fan all returned successfully. The writes repeated the units' existing settings; changing to new values has not yet been checked physically, so this remains an early-access release.
+Klimat is an early prototype. Two Mitsubishi MSZ-LN35VG2W units using the MAC-577IF-2E adapter returned status successfully. On one unit, a 23 °C setpoint changed to 23.5 °C and was confirmed by a fresh status read, then restored to 23 °C and confirmed again. Both units remain early-access hardware coverage; other controls and models need further verification.
 
 ## Supported connections
 
@@ -12,13 +12,15 @@ Klimat is an early prototype. On two Mitsubishi MSZ-LN35VG2W units using the MAC
 | Mitsubishi Electric MELCloud Classic | Cloud | Email/password sign-in and power, setpoint, operating mode, and fan controls. |
 | Mitsubishi Electric MELCloud Home | Cloud | Separate service using the same account email/password and supported air-to-air controls. |
 | LG ThinQ | Cloud | Official ThinQ Connect API. Requires a Personal Access Token with air-conditioner access and the country where the LG account was created. |
+| Toshiba Lifestyle | Cloud | Toshiba account sign-in and cloud control through the Toshiba AC service. Device and account availability depends on region and Wi-Fi adapter. |
+| Gree | Cloud | Experimental account sign-in with regional selection and MQTT control. Needs confirmation with a real account and device. |
 | Midea and compatible Comfee/Toshiba Lifestyle units | Local network | Broadcast discovery or a manually entered IP address. Compatibility depends on the unit and Wi-Fi module. |
 | Gree | Local network | Automatic discovery and pairing for supported units. |
 | Daikin | Local network | Manual IP address for adapters exposing the compatible, older local HTTP API. Cloud-only and newer authenticated adapters are not covered. |
 
 You can save up to six units. The popup offers power, target temperature, cool/heat/auto/dry/fan modes, and fan speed where the device supports them. It refreshes the selected unit while the popup is open and when it becomes visible again.
 
-MELCloud Classic and MELCloud Home are separate services; choose the one used by your unit. For LG, create a token at [LG ThinQ Connect](https://connect-pat.lgthinq.com), grant it access to air conditioners, and select the country where the LG account was registered. Credentials and tokens are kept in the operating system keychain. Do not share them in bug reports. Check that the account works in the matching official app or website before reporting a login issue.
+MELCloud Classic and MELCloud Home are separate services; choose the one used by your unit. For LG, create a token at [LG ThinQ Connect](https://connect-pat.lgthinq.com), grant it access to air conditioners, and select the country where the LG account was registered. Toshiba Lifestyle Cloud uses the same account as the official Toshiba AC app. Gree Cloud requires the account region used by the Gree app. Credentials and tokens are kept in the operating system keychain. Do not share them in bug reports. Check that the account works in the matching official app or website before reporting a login issue.
 
 The Mitsubishi local adapter is based on the MIT-licensed [pymitsubishi](https://github.com/pymitsubishi/pymitsubishi) implementation. Klimat sends a status request without changing the adapter's MELCloud or ECHONET settings. Legacy ECHONET profiles remain readable, but the current setup flow uses the local HTTP API. The `MSZ-LN35VG2W` is also reported working over its CN105 service connector with an ESPHome-compatible adapter; that requires additional hardware, and Klimat does not control CN105 directly.
 
@@ -71,11 +73,11 @@ pnpm build:adapter
 pnpm tauri build
 ```
 
-Build installers on their target operating system. The CI workflow builds the Linux, macOS, and Windows targets listed above. The bundled Python adapter includes clients for MELCloud Classic, MELCloud Home, LG ThinQ Connect, Mitsubishi MAC-577IF-2E, and Midea-compatible units; Gree uses the `gree-climate` Rust crate, and Daikin uses its local HTTP API directly.
+Build installers on their target operating system. The CI workflow builds the Linux, macOS, and Windows targets listed above. The bundled Python adapter includes clients for MELCloud Classic, MELCloud Home, Toshiba Lifestyle Cloud, Gree Cloud, LG ThinQ Connect, Mitsubishi MAC-577IF-2E, and Midea-compatible units; local Gree control uses the `gree-climate` Rust crate, and Daikin uses its local HTTP API directly.
 
 ## License and third-party notices
 
-This repository does not currently include a project license. Until one is added, do not assume that Klimat source code is licensed for reuse. Adapter builds collect third-party license notices in `THIRD_PARTY_LICENSES.txt`. Review the licenses of `python-melcloud`, `aiomelcloudhome`, `thinqconnect`, `pymitsubishi`, `midea-local`, `gree-climate`, and their transitive dependencies before redistribution. The ThinQ Connect SDK is Apache-2.0 and the MELCloud Home client is MIT-licensed. Home Assistant Core is Apache-2.0; if source code is copied from it, retain the required notices and comply with its license.
+Klimat is licensed under GPL-3.0-only; see [LICENSE](LICENSE). Adapter builds collect third-party license notices in `THIRD_PARTY_LICENSES.txt`. Gree Cloud support uses [greeclimate-davo22](https://github.com/davo22/greeclimate), licensed under GPL-3.0. Other included libraries retain their own licenses. Home Assistant Core is Apache-2.0; if source code is copied from it, retain the required notices and comply with its license.
 
 ## Contributing
 

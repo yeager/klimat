@@ -6,7 +6,7 @@ from pathlib import Path
 from packaging.requirements import Requirement
 
 
-ROOTS = ("python-melcloud", "midea-local", "aiohttp", "aiomelcloudhome", "thinqconnect", "pymitsubishi")
+ROOTS = ("python-melcloud", "midea-local", "aiohttp", "aiomelcloudhome", "thinqconnect", "pymitsubishi", "toshiba-ac-community", "azure-iot-device", "greeclimate-davo22")
 LICENSE_NAMES = ("license", "copying", "notice", "copyright")
 OUTPUT = Path(__file__).parent / "dist" / "THIRD_PARTY_LICENSES.txt"
 GREE_LICENSE = Path(__file__).parent.parent / "licenses" / "gree-climate-MIT.txt"

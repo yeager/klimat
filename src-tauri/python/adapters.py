@@ -1,11 +1,18 @@
 """Standalone climate adapters, with Home Assistant used as a protocol reference."""
 
 from urllib.parse import parse_qsl, unquote
+import asyncio
 
 
 DAIKIN_MODES = {"0": "auto", "1": "auto", "2": "dry", "3": "cool", "4": "heat", "6": "fan", "7": "auto"}
 DAIKIN_MODE_VALUES = {"auto": "0", "cool": "3", "heat": "4", "dry": "2", "fan": "6"}
 MIDEA_BRANDS = {"midea", "comfee", "toshiba-lifestyle"}
+TOSHIBA_CLOUD_MODES = {"AUTO": "auto", "COOL": "cool", "HEAT": "heat", "DRY": "dry", "FAN": "fan"}
+TOSHIBA_CLOUD_FANS = {"AUTO": "auto", "QUIET": "low", "LOW": "low", "MEDIUM_LOW": "low", "MEDIUM": "medium", "MEDIUM_HIGH": "high", "HIGH": "high"}
+GREE_MODES = {0: "auto", 1: "cool", 2: "dry", 3: "fan", 4: "heat"}
+GREE_MODE_VALUES = {value: key for key, value in GREE_MODES.items()}
+GREE_FANS = {0: "auto", 1: "low", 2: "low", 3: "medium", 4: "high", 5: "high"}
+GREE_FAN_VALUES = {"auto": 0, "low": 1, "medium": 3, "high": 5}
 
 
 def device_limit(payload):
@@ -421,6 +428,210 @@ async def melcloud_home_command(payload):
         refreshed = await client.get_context()
         unit = melcloud_home_find_unit(refreshed, unit.id) or unit
         return melcloud_home_device(unit)
+
+
+def toshiba_cloud_device(device, profile_id):
+    from toshiba_ac.device.properties import ToshibaAcStatus
+
+    mode = TOSHIBA_CLOUD_MODES.get(device.ac_mode.name, "auto")
+    fans = device.supported.for_ac_mode(device.ac_mode).ac_fan_mode
+    available_fans = sorted({TOSHIBA_CLOUD_FANS[fan.name] for fan in fans if fan.name in TOSHIBA_CLOUD_FANS})
+    result = {
+        "id": str(device.ac_unique_id),
+        "name": device.name or "Toshiba AC",
+        "brand": "toshiba-cloud",
+        "kind": "cloud",
+        "state": "on" if device.ac_status == ToshibaAcStatus.ON else "off",
+        "target": device.ac_temperature or 22,
+        "temperatureStep": 1,
+        "current": device.ac_indoor_temperature or 0,
+        "mode": mode,
+        "fan": TOSHIBA_CLOUD_FANS.get(device.ac_fan_mode.name, "auto"),
+        "availableModes": [TOSHIBA_CLOUD_MODES[item.name] for item in device.supported.ac_mode if item.name in TOSHIBA_CLOUD_MODES],
+        "availableFans": available_fans,
+        "connection": {"profile_id": profile_id},
+    }
+    return result
+
+
+async def toshiba_cloud_request(payload, action):
+    from toshiba_ac.device.properties import ToshibaAcFanMode, ToshibaAcMode, ToshibaAcStatus
+    from toshiba_ac.device_manager import ToshibaAcDeviceManager
+
+    profile_id = str(payload.get("profileId") or payload.get("id") or "")
+    profile = next((entry for entry in payload.get("profiles", []) if str(entry.get("id")) == profile_id), None)
+    credentials = profile or payload
+    username, password = credentials.get("username"), credentials.get("password")
+    if not username or not password:
+        raise ValueError("Ange e-postadress och lösenord för Toshiba-kontot.")
+    if action in {"discover", "restore"} and device_limit(payload) <= 0:
+        return {"devices": [], "profile": {}}
+
+    manager = ToshibaAcDeviceManager(username=username, password=password, device_id=profile_id or None)
+    try:
+        await manager.connect()
+        devices = await manager.get_devices()
+        selected = requested_ids(payload) if action == "restore" else None
+        if action in {"discover", "restore"}:
+            result = []
+            limit = device_limit(payload)
+            for device in devices:
+                if selected is not None and str(device.ac_unique_id) not in selected:
+                    continue
+                if action == "discover" and already_known(payload, "toshiba-cloud", device.ac_unique_id):
+                    continue
+                await device.state_reload()
+                item = toshiba_cloud_device(device, profile_id)
+                result.append(item)
+                if len(result) >= limit:
+                    break
+            return {"devices": result, "profile": {}}
+
+        device_id = str((payload.get("device") or {}).get("id") or "")
+        device = next((item for item in devices if str(item.ac_unique_id) == device_id), None)
+        if device is None:
+            raise ValueError("Toshiba-luftkonditioneringen hittades inte på kontot.")
+        action_value = payload.get("value")
+        if action == "status":
+            await device.state_reload()
+        elif action == "power":
+            await device.set_ac_status(ToshibaAcStatus.ON if action_value == "on" else ToshibaAcStatus.OFF)
+        elif action == "temperature":
+            await device.set_ac_temperature(round(float(action_value)))
+        elif action == "mode":
+            name = {"cool": "COOL", "heat": "HEAT", "auto": "AUTO", "dry": "DRY", "fan": "FAN"}.get(str(action_value))
+            if not name or not hasattr(ToshibaAcMode, name):
+                raise ValueError("Det valda driftläget stöds inte av Toshiba-enheten.")
+            await device.set_ac_mode(getattr(ToshibaAcMode, name))
+        elif action == "fan":
+            name = {"auto": "AUTO", "low": "LOW", "medium": "MEDIUM", "high": "HIGH"}.get(str(action_value))
+            if not name or not hasattr(ToshibaAcFanMode, name):
+                raise ValueError("Den valda fläkthastigheten stöds inte av Toshiba-enheten.")
+            await device.set_ac_fan_mode(getattr(ToshibaAcFanMode, name))
+        else:
+            raise ValueError(f"Toshiba-molnkommandot stöds inte: {action}")
+        if action != "status":
+            await asyncio.sleep(1)
+            await device.state_reload()
+        return toshiba_cloud_device(device, profile_id)
+    finally:
+        await manager.shutdown()
+
+
+def gree_cloud_device(device, info, profile_id):
+    from greeclimate_davo22.device import Mode, Props, TemperatureUnits
+
+    fan_value = device.fan_speed
+    mode_value = device.mode
+    half_degree = device.get_property(Props.TEMP_HALF_ENABLED)
+    target = device.target_temperature
+    current = device.current_temperature
+    if device.temperature_units == TemperatureUnits.F.value:
+        target = (target - 32) * 5 / 9 if target is not None else None
+        current = (current - 32) * 5 / 9 if current is not None else None
+    return {
+        "id": str(info.mac),
+        "name": info.name or "Gree AC",
+        "brand": "gree-cloud",
+        "kind": "cloud",
+        "state": "on" if device.power else "off",
+        "target": round(target, 1) if target is not None else 22,
+        "temperatureStep": 0.5 if half_degree == 1 else 1,
+        "minTarget": 8,
+        "maxTarget": 30,
+        "current": round(current, 1) if current is not None else 0,
+        "mode": GREE_MODES.get(int(mode_value), "auto") if mode_value is not None else "auto",
+        "fan": GREE_FANS.get(int(fan_value), "auto") if fan_value is not None else "auto",
+        "availableModes": [GREE_MODES[mode.value] for mode in Mode],
+        "availableFans": ["low", "medium", "high"],
+        "online": bool(info.online),
+        "connection": {"profile_id": profile_id},
+    }
+
+
+async def gree_cloud_request(payload, action):
+    from greeclimate_davo22.cloud_discovery import CloudDiscovery
+    from greeclimate_davo22.device import FanSpeed, Mode
+
+    profile_id = str(payload.get("profileId") or payload.get("id") or "")
+    profile = next((entry for entry in payload.get("profiles", []) if str(entry.get("id")) == profile_id), None)
+    credentials = profile or payload
+    username, password = credentials.get("username"), credentials.get("password")
+    if not username or not password:
+        raise ValueError("Ange e-postadress och lösenord för Gree-kontot.")
+    if action in {"discover", "restore"} and device_limit(payload) <= 0:
+        return {"devices": [], "profile": {}}
+
+    region = credentials.get("region") or "Europe"
+    if region not in CloudDiscovery.list_servers():
+        raise ValueError("Välj Gree-molnregion för kontot.")
+    discovery = CloudDiscovery(username=username, password=password, server=region)
+    bound_devices = []
+    try:
+        infos = await discovery.scan()
+        selected = requested_ids(payload) if action == "restore" else None
+        if action in {"discover", "restore"}:
+            devices = []
+            limit = device_limit(payload)
+            for info in infos:
+                if selected is not None and str(info.mac) not in selected:
+                    continue
+                if not info.online:
+                    continue
+                if action == "discover" and already_known(payload, "gree-cloud", info.mac):
+                    continue
+                device = await discovery.create_device(info)
+                bound_devices.append(device)
+                await device.bind()
+                if not device.has_valid_state:
+                    raise ConnectionError(f"Gree-enheten {info.name or info.mac} svarade inte på statusförfrågan.")
+                devices.append(gree_cloud_device(device, info, profile_id))
+                if len(devices) >= limit:
+                    break
+            return {"devices": devices, "profile": {}}
+
+        item = payload.get("device") or {}
+        device_id = str(item.get("id") or "")
+        info = next((entry for entry in infos if str(entry.mac) == device_id), None)
+        if info is None:
+            raise ValueError("Gree-luftkonditioneringen hittades inte på kontot.")
+        if not info.online:
+            raise ConnectionError("Gree-luftkonditioneringen är offline i molntjänsten.")
+        device = await discovery.create_device(info)
+        bound_devices.append(device)
+        await device.bind()
+        if not device.has_valid_state:
+            raise ConnectionError(f"Gree-enheten {info.name or info.mac} svarade inte på statusförfrågan.")
+
+        value = payload.get("value")
+        if action == "power":
+            device.power = value == "on"
+        elif action == "temperature":
+            target = float(value)
+            if device.temperature_units == 1:
+                target = target * 9 / 5 + 32
+            device.target_temperature = target
+        elif action == "mode":
+            if str(value) not in GREE_MODE_VALUES:
+                raise ValueError("Det valda driftläget stöds inte av Gree-enheten.")
+            device.mode = Mode(GREE_MODE_VALUES[str(value)]).value
+        elif action == "fan":
+            if str(value) not in GREE_FAN_VALUES:
+                raise ValueError("Den valda fläkthastigheten stöds inte av Gree-enheten.")
+            device.fan_speed = FanSpeed(GREE_FAN_VALUES[str(value)]).value
+        else:
+            raise ValueError(f"Gree-molnkommandot stöds inte: {action}")
+        if action != "status":
+            await device.push_state_update()
+            await asyncio.sleep(1)
+            await device.update_state()
+        if not device.has_valid_state:
+            raise ConnectionError(f"Gree-enheten {info.name or info.mac} svarade inte på statusförfrågan.")
+        return gree_cloud_device(device, info, profile_id)
+    finally:
+        for device in bound_devices:
+            await device.close()
+        await discovery.close()
 
 
 def thinq_mode(value):
@@ -973,6 +1184,10 @@ async def handle(payload):
         return await melcloud_status(payload)
     if action == "status" and brand == "melcloud-home":
         return await melcloud_home_command({**payload, "action": "status"})
+    if action == "status" and brand == "toshiba-cloud":
+        return await toshiba_cloud_request(payload, action)
+    if action == "status" and brand == "gree-cloud":
+        return await gree_cloud_request(payload, action)
     if action == "status" and brand == "lg-thinq":
         return await thinq_request(payload, action)
     if action == "status" and brand == "daikin":
@@ -984,6 +1199,10 @@ async def handle(payload):
             return await melcloud_connect(payload)
         if brand == "melcloud-home":
             return await melcloud_home_connect(payload)
+        if brand == "toshiba-cloud":
+            return await toshiba_cloud_request(payload, action)
+        if brand == "gree-cloud":
+            return await gree_cloud_request(payload, action)
         if brand == "lg-thinq":
             return await thinq_request(payload, action)
         if brand == "daikin":
@@ -998,6 +1217,10 @@ async def handle(payload):
             return await melcloud_restore(payload)
         if brand == "melcloud-home":
             return await melcloud_home_connect(payload, action)
+        if brand == "toshiba-cloud":
+            return await toshiba_cloud_request(payload, action)
+        if brand == "gree-cloud":
+            return await gree_cloud_request(payload, action)
         if brand == "lg-thinq":
             return await thinq_request(payload, action)
         if brand == "daikin":
@@ -1009,6 +1232,10 @@ async def handle(payload):
         return await melcloud_command(payload)
     if brand == "melcloud-home":
         return await melcloud_home_command(payload)
+    if brand == "toshiba-cloud":
+        return await toshiba_cloud_request(payload, action)
+    if brand == "gree-cloud":
+        return await gree_cloud_request(payload, action)
     if brand == "lg-thinq":
         return await thinq_request(payload, action)
     if brand == "daikin":

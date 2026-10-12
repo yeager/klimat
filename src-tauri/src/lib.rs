@@ -270,11 +270,21 @@ fn climate_request_blocking(payload: Value) -> Result<Value, String> {
     let output = child
         .wait_with_output()
         .map_err(|error| error.to_string())?;
+    let mut response: Value = serde_json::from_slice(&output.stdout).map_err(|error| {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !output.status.success() {
+            format!("Adapterbryggan avslutades med {}: {}", output.status, stderr.trim())
+        } else {
+            format!("Ogiltigt svar från adapterbryggan: {error}. {}", stderr.trim())
+        }
+    })?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err(response
+            .get("error")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| String::from_utf8_lossy(&output.stderr).trim().to_string()));
     }
-    let mut response: Value = serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("Ogiltigt svar från adapterbryggan: {error}"))?;
     let active_profile = payload
         .get("profileId")
         .and_then(Value::as_str)

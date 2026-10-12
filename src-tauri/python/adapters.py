@@ -1280,6 +1280,8 @@ def mitsubishi_local_state(controller, host, profile_id):
     )
     fan_name = getattr(general.wind_speed, "name", "AUTO")
     fan = {"AUTO": "auto", "S1": "low", "S2": "low", "S3": "medium", "S4": "high", "FULL": "high"}.get(fan_name, "auto")
+    vertical = getattr(getattr(general, "vertical_wind_direction", None), "name", None)
+    horizontal = getattr(getattr(general, "horizontal_wind_direction", None), "name", None)
     return {
         "id": host,
         "name": f"Mitsubishi Electric {host}",
@@ -1293,6 +1295,8 @@ def mitsubishi_local_state(controller, host, profile_id):
         "current": state.sensors.room_temperature if state.sensors else 0,
         "mode": mode,
         "fan": fan,
+        "verticalVane": vertical,
+        "horizontalVane": horizontal,
         "availableModes": ["auto", "cool", "heat", "dry", "fan"],
         "availableFans": ["low", "medium", "high"],
         "connection": {"profile_id": profile_id, "endpoint": host},
@@ -1303,14 +1307,14 @@ def mitsubishi_local_request(payload):
     import time
 
     from pymitsubishi import MitsubishiController
-    from pymitsubishi.mitsubishi_parser import DriveMode, WindSpeed
+    from pymitsubishi.mitsubishi_parser import DriveMode, HorizontalWindDirection, VerticalWindDirection, WindSpeed
 
     host = mitsubishi_endpoint(payload)
     profile_id = payload.get("profileId") or payload.get("id")
     controller = MitsubishiController.create(host)
     try:
         action, value = payload.get("action"), payload.get("value")
-        if action in {"power", "temperature", "mode", "fan"}:
+        if action in {"power", "temperature", "mode", "fan", "verticalVane", "horizontalVane"}:
             controller.fetch_status()
             if action == "power":
                 controller.set_power(value == "on")
@@ -1326,6 +1330,14 @@ def mitsubishi_local_request(payload):
                 if str(value) not in fans:
                     raise ValueError("Den valda fläkthastigheten stöds inte av Mitsubishi-adaptern.")
                 controller.set_fan_speed(fans[str(value)])
+            elif action == "verticalVane":
+                if str(value) not in VerticalWindDirection.__members__:
+                    raise ValueError("Det valda vertikala lamelläget stöds inte av Mitsubishi-adaptern.")
+                controller.set_vertical_vane(VerticalWindDirection[str(value)])
+            elif action == "horizontalVane":
+                if str(value) not in HorizontalWindDirection.__members__:
+                    raise ValueError("Det valda horisontella lamelläget stöds inte av Mitsubishi-adaptern.")
+                controller.set_horizontal_vane(HorizontalWindDirection[str(value)])
             time.sleep(controller.wait_time_after_command)
         device = mitsubishi_local_state(controller, host, profile_id)
         if action == "discover" and already_known(payload, "mitsubishi-local", device["id"]):
@@ -1335,6 +1347,11 @@ def mitsubishi_local_request(payload):
         return device
     finally:
         controller.api.close()
+
+
+def mitsubishi_discover(payload):
+    """Discover Mitsubishi Wi-Fi adapters using their local adapter protocol."""
+    return mitsubishi_local_request(payload)
 
 
 def midea_command(payload):
@@ -1395,7 +1412,9 @@ def normalize_melcloud_fan(device):
 
 async def handle(payload):
     action, brand = payload.get("action"), payload.get("brand")
-    if brand == "mitsubishi-local" and action in {"status", "discover", "restore", "power", "temperature", "mode", "fan"}:
+    if brand == "mitsubishi-local" and action == "discover":
+        return mitsubishi_discover(payload)
+    if brand == "mitsubishi-local" and action in {"status", "restore", "power", "temperature", "mode", "fan", "verticalVane", "horizontalVane"}:
         return mitsubishi_local_request(payload)
     if brand == "mitsubishi-echonet" and action == "status":
         return mitsubishi_echonet_connect(payload, "status")

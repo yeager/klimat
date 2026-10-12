@@ -1,14 +1,14 @@
 # Klimat
 
-Klimat is a compact air-conditioner controller for Linux, macOS, and Windows. It lives in the system tray and opens a small popup for the controls used most often: power, room temperature, target temperature, operating mode, and fan speed.
+Klimat is a compact air-conditioner controller for Linux, macOS, and Windows. It lives in the system tray and opens a small popup for the controls used most often: power, room temperature, target temperature, operating mode, fan speed, and Mitsubishi vane direction where available.
 
-Klimat is an early prototype. Two Mitsubishi MSZ-LN35VG2W units using the MAC-577IF-2E adapter returned status successfully. On one unit, a 23 °C setpoint changed to 23.5 °C and was confirmed by a fresh status read, then restored to 23 °C and confirmed again. Both units remain early-access hardware coverage; other controls and models need further verification.
+Klimat is an early-access application. Two Mitsubishi MSZ-LN35VG2W units using the MAC-577IF-2E adapter returned status successfully. On one unit, a 23 °C setpoint changed to 23.5 °C and was confirmed by a fresh status read, then restored to 23 °C and confirmed again. Vertical vane position and horizontal vane direction were also changed and read back on one unit, then restored to `AUTO`. Other models and cloud providers need further hardware verification.
 
 ## Supported connections
 
 | Provider | Connection | Status and limits |
 | --- | --- | --- |
-| Mitsubishi Electric local adapter | Local network | Manual adapter IP. Uses the MAC-577IF-2E local HTTP API; ECHONET Lite does not need to be enabled. Tested for status reads on two MSZ-LN35VG2W units. |
+| Mitsubishi Electric local adapter | Local network | Manual adapter IP. Uses the MAC-577IF-2E local HTTP API; ECHONET Lite does not need to be enabled. Status tested on two MSZ-LN35VG2W units; vertical and horizontal vane commands tested on one. |
 | Mitsubishi Electric MELCloud Classic | Cloud | Email/password sign-in and power, setpoint, operating mode, and fan controls. |
 | Mitsubishi Electric MELCloud Home | Cloud | Separate service using the same account email/password and supported air-to-air controls. |
 | LG ThinQ | Cloud | Official ThinQ Connect API. Requires a Personal Access Token with air-conditioner access and the country where the LG account was created. |
@@ -20,7 +20,7 @@ Klimat is an early prototype. Two Mitsubishi MSZ-LN35VG2W units using the MAC-57
 | Gree | Local network | Automatic discovery and pairing for supported units. |
 | Daikin | Local network | Manual IP address for adapters exposing the compatible, older local HTTP API. Cloud-only and newer authenticated adapters are not covered. |
 
-You can save up to six units. The popup offers power, target temperature, cool/heat/auto/dry/fan modes, and fan speed where the device supports them. It refreshes the selected unit while the popup is open and when it becomes visible again.
+You can save up to six units. The popup offers power, target temperature, cool/heat/auto/dry/fan modes, and fan speed where the device supports them. Local Mitsubishi units also show compact vertical and horizontal vane selectors when the adapter reports vane state. It refreshes the selected unit while the popup is open and when it becomes visible again.
 
 MELCloud Classic and MELCloud Home are separate services; choose the one used by your unit. For LG, create a token at [LG ThinQ Connect](https://connect-pat.lgthinq.com), grant it access to air conditioners, and select the country where the LG account was registered. Toshiba Lifestyle Cloud uses the same account as the official Toshiba AC app. Gree Cloud requires the account region used by the Gree app. Credentials and tokens are kept in the operating system keychain. Do not share them in bug reports. Check that the account works in the matching official app or website before reporting a login issue.
 
@@ -30,7 +30,7 @@ The Mitsubishi local adapter is based on the MIT-licensed [pymitsubishi](https:/
 
 ## Download
 
-Download [Klimat 0.1.11](https://github.com/yeager/klimat/releases/tag/v0.1.11), the current early-access release. It includes:
+Download [Klimat 0.1.12](https://github.com/yeager/klimat/releases/tag/v0.1.12), the current early-access release. It includes:
 
 - Linux x64 `.deb` and `.rpm`
 - Intel Mac `.dmg` and Apple Silicon `.dmg`

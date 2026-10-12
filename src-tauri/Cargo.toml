@@ -1,6 +1,6 @@
 [package]
 name = "klimat"
-version = "0.1.11"
+version = "0.1.12"
 description = "Compact air-conditioner control from the system tray"
 authors = ["Daniel Nylander"]
 edition = "2024"

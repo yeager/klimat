@@ -2062,6 +2062,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "klimat"
+version = "0.1.11"
+dependencies = [
+ "gree-climate",
+ "keyring",
+ "objc2",
+ "objc2-app-kit",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tauri-plugin-shell",
+ "tokio",
+ "tray-icon",
+]
+
+[[package]]
 name = "ksni"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3743,24 +3761,6 @@ dependencies = [
  "webview2-com",
  "window-vibrancy",
  "windows",
-]
-
-[[package]]
-name = "tauri-app"
-version = "0.1.11"
-dependencies = [
- "gree-climate",
- "keyring",
- "objc2",
- "objc2-app-kit",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tauri-plugin-shell",
- "tokio",
- "tray-icon",
 ]
 
 [[package]]

@@ -27,6 +27,8 @@ jobs:
             target: windows-x64
             bundles: msi,nsis
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 

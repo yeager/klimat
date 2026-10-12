@@ -45,6 +45,7 @@ function App() {
   const [profile, setProfile] = useState<ConnectionDraft>({ region: "eu" });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageDetail, setMessageDetail] = useState("");
   const [restored, setRestored] = useState(false);
   const [language, setLanguage] = useState<Language>(detectLanguage);
   const t = (key: MessageKey) => messages[language][key];
@@ -82,7 +83,7 @@ function App() {
   }, []);
   useEffect(() => {
     if (!message || showAdd) return;
-    const timeout = window.setTimeout(() => setMessage(""), 3500);
+    const timeout = window.setTimeout(() => { setMessage(""); setMessageDetail(""); }, 3500);
     return () => window.clearTimeout(timeout);
   }, [message, showAdd]);
   useEffect(() => {
@@ -146,10 +147,14 @@ function App() {
     };
   }, [active?.brand, active?.id, active?.kind, active?.profileId, profiles, restored]);
 
-  function beginAdd(kind: ConnectionKind) { if (deviceCount >= MAX_DEVICES) { setMessage(t("deviceLimit")); return; } setCategory(kind); setBrandId(kind === "cloud" ? "melcloud" : "midea"); setProfile({ region: "eu" }); setMessage(""); setShowAdd(true); }
+  function beginAdd(kind: ConnectionKind) { if (deviceCount >= MAX_DEVICES) { setMessage(t("deviceLimit")); setMessageDetail(""); return; } setCategory(kind); setBrandId(kind === "cloud" ? "melcloud" : "midea"); setProfile({ region: "eu" }); setMessage(""); setMessageDetail(""); setShowAdd(true); }
+  function showAdapterError(error: unknown, fallback: string) {
+    setMessage(fallback);
+    setMessageDetail(error instanceof Error ? error.message : "");
+  }
   async function connect() {
     if (deviceCount >= MAX_DEVICES) { setMessage(t("deviceLimit")); return; }
-    setBusy(true); setMessage("");
+    setBusy(true); setMessage(""); setMessageDetail("");
     try {
       const next = { id: crypto.randomUUID(), kind: category, brand: brandId, label: chosenBrand.name, endpoint: profile.endpoint || "", region: profile.region || "eu", username: profile.username || "", password: profile.password || "", token: profile.token || "", key: profile.key || "", otp: profile.otp || "" };
       const response = await invoke<{ devices: Device[]; profile?: Partial<Profile> }>("climate_request", { payload: { ...next, profiles, knownDevices: devices.map(({ id, brand }) => ({ id: String(id), brand })), kind: category, brand: brandId, maxDevices: MAX_DEVICES - deviceCount, action: "discover" } });
@@ -160,18 +165,18 @@ function App() {
       if (response.devices.length > newDevices.length && deviceCount + newDevices.length >= MAX_DEVICES) setMessage(t("deviceLimit"));
       if (newDevices.length) { setDevices((current) => [...current, ...newDevices]); setSelected(deviceKey(newDevices[0])); setShowAdd(false); setMessage(`${newDevices.length} ${t("found")}`); }
       else setMessage(t("savedDiscovery"));
-    } catch (err) { setMessage(err instanceof Error ? err.message : t("connectFailed")); }
+    } catch (err) { showAdapterError(err, t("connectFailed")); }
     finally { setBusy(false); }
   }
 
   async function command(action: string, value?: string | number) {
     if (!active) return;
-    setBusy(true); setMessage("");
+    setBusy(true); setMessage(""); setMessageDetail("");
     try {
       const updated: Partial<Device> = await invoke("climate_request", { payload: { kind: active.kind, brand: active.brand, action, value, device: active, profileId: active.profileId, profiles } });
       setDevices((current) => current.map((device) => deviceKey(device) === deviceKey(active) ? { ...device, ...updated, online: true } : device));
       setMessage(t("sent"));
-    } catch (err) { setDevices((current) => current.map((device) => deviceKey(device) === deviceKey(active) ? { ...device, online: false } : device)); setMessage(err instanceof Error ? err.message : t("commandFailed")); }
+    } catch (err) { setDevices((current) => current.map((device) => deviceKey(device) === deviceKey(active) ? { ...device, online: false } : device)); showAdapterError(err, t("commandFailed")); }
     finally { setBusy(false); }
   }
 
@@ -180,14 +185,14 @@ function App() {
     const profileId = active.profileId;
     const remaining = devices.filter((device) => deviceKey(device) !== deviceKey(active));
     const profileStillUsed = Boolean(profileId && remaining.some((device) => device.profileId === profileId));
-    setBusy(true); setMessage("");
+    setBusy(true); setMessage(""); setMessageDetail("");
     try {
       await invoke("climate_request", { payload: { action: "forget", brand: active.brand, profileId, device: active, deleteProfile: !profileStillUsed } });
       setDevices(remaining);
       setSelected(remaining[0] ? deviceKey(remaining[0]) : "");
       if (profileId && !profileStillUsed) setProfiles((current) => current.filter((profile) => profile.id !== profileId));
       setMessage(t("removedDevice"));
-    } catch (err) { setMessage(err instanceof Error ? err.message : t("commandFailed")); }
+    } catch (err) { showAdapterError(err, t("commandFailed")); }
     finally { setBusy(false); }
   }
 
@@ -203,10 +208,10 @@ function App() {
       {brandId === "daikin" && <><label>{t("ipAddress")}<input value={profile.endpoint || ""} onChange={(e) => setProfile({ ...profile, endpoint: e.target.value })} placeholder="192.168.1.42" /></label><p className="hint">{t("daikinHint")}</p></>}
       {brandId === "gree" && <p className="hint">{t("greeHint")}</p>}
       <button className="primary-button" disabled={busy || deviceCount >= MAX_DEVICES || (["melcloud", "melcloud-home", "toshiba-cloud", "gree-cloud", "panasonic-cloud"].includes(brandId) && (!profile.username || !profile.password)) || (["lg-thinq", "samsung-smartthings"].includes(brandId) && !profile.token) || (["daikin", "mitsubishi-local"].includes(brandId) && !profile.endpoint)} onClick={() => void connect()}>{busy ? t("connecting") : t("connectDiscover")}</button>
-    </> : <div className="planned-card"><b>{t("planned")}</b><p>{t("plannedHint")}</p></div>}{message && <p className="feedback">{message}</p>}</section> : <>
+      </> : <div className="planned-card"><b>{t("planned")}</b><p>{t("plannedHint")}</p></div>}{message && <p className="feedback" title={messageDetail || undefined}>{message}</p>}</section> : <>
       {active ? <>{devices.length > 1 && <div className="device-tabs">{devices.map((device) => { const brand = brands.find((item) => item.id === device.brand); return <button key={deviceKey(device)} className={`device-tab ${deviceKey(active) === deviceKey(device) ? "active" : ""}`} onClick={() => setSelected(deviceKey(device))} title={device.name}><span className="device-brand-icon" style={{ "--manufacturer-tint": brand?.tint || "#e9efeb" } as React.CSSProperties}><img src={`/manufacturer-icons/${manufacturerIcon(device.brand)}.svg`} alt="" /></span>{device.name}</button>; })}</div>}<section className="control-card"><div className="card-top"><div className="active-device-title"><span className="device-brand-icon active-brand-icon" style={{ "--manufacturer-tint": brands.find((item) => item.id === active.brand)?.tint || "#e9efeb" } as React.CSSProperties}><img src={`/manufacturer-icons/${manufacturerIcon(active.brand)}.svg`} alt="" /></span><div><h3>{active.name}</h3><span className="eyebrow">{active.kind === "cloud" ? t("cloud").toUpperCase() : t("local").toUpperCase()} · {active.state === "on" ? t("on") : t("off")}</span></div></div><div className="card-actions"><button className="remove-device" disabled={busy} aria-label={t("removeDevice")} title={t("removeDevice")} onClick={() => void forgetActiveDevice()}>×</button><button className={`power ${active.state === "on" ? "on" : ""}`} disabled={busy} aria-label={active.state === "on" ? t("off") : t("on")} onClick={() => void command("power", active.state === "on" ? "off" : "on")}>⏻</button></div></div><div className="temperature"><span>{active.current}<small>°</small></span><div><b>{t((modes.find((mode) => mode.id === active.mode)?.id || "off") as MessageKey)}</b><small>{t("indoor")}</small></div></div><div className="target-row"><div><span className="eyebrow">{t("setpoint")}</span><strong>{active.target}<small>°C</small></strong></div><div className="stepper"><button disabled={busy || (active.minTarget !== undefined && active.target - temperatureStep < active.minTarget - 0.001)} aria-label={t("lowerTemp")} onClick={() => void command("temperature", active.target - temperatureStep)}>−</button><button disabled={busy || (active.maxTarget !== undefined && active.target + temperatureStep > active.maxTarget + 0.001)} aria-label={t("raiseTemp")} onClick={() => void command("temperature", active.target + temperatureStep)}>＋</button></div></div><div className="control-divider"/><div className="mode-grid">{supportedModes.map((mode) => <button key={mode.id} disabled={busy} aria-label={t(mode.id as MessageKey)} onClick={() => void command("mode", mode.id)} className={`mode-button ${active.mode === mode.id ? "selected" : ""}`}><span>{mode.icon}</span>{t(mode.id as MessageKey)}</button>)}</div><label className="select-label">{t("fan")}<select aria-label={t("fan")} value={active.fan} disabled={busy} onChange={(e) => void command("fan", e.target.value)}>{supportedFans.map((fan) => <option key={fan} value={fan}>{t(fan as MessageKey)}</option>)}</select></label>{active.brand === "mitsubishi-local" && active.verticalVane && active.horizontalVane && <div className="vane-controls"><label>{t("verticalAirflow")}<select aria-label={t("verticalAirflow")} value={active.verticalVane} disabled={busy} onChange={(e) => void command("verticalVane", e.target.value)}>{["AUTO", "V1", "V2", "V3", "V4", "V5", "SWING"].map((value) => <option key={value} value={value}>{value === "AUTO" ? t("auto") : value === "SWING" ? t("swing") : value.slice(1)}</option>)}</select></label><label>{t("horizontalAirflow")}<select aria-label={t("horizontalAirflow")} value={active.horizontalVane} disabled={busy} onChange={(e) => void command("horizontalVane", e.target.value)}>{["AUTO", "FAR_LEFT", "LEFT", "CENTER", "RIGHT", "FAR_RIGHT", "LEFT_CENTER", "CENTER_RIGHT", "LEFT_RIGHT", "LEFT_CENTER_RIGHT", "SWING"].map((value) => <option key={value} value={value}>{value === "AUTO" ? t("auto") : value === "SWING" ? t("swing") : ({ FAR_LEFT: "⇤", LEFT: "←", CENTER: "•", RIGHT: "→", FAR_RIGHT: "⇥", LEFT_CENTER: "⇤←", CENTER_RIGHT: "→⇥", LEFT_RIGHT: "↔", LEFT_CENTER_RIGHT: "⇤•⇥" } as Record<string, string>)[value]}</option>)}</select></label></div>}</section></> : <section className="empty-card"><h3>{t("emptyTitle")}</h3><p>{t("emptyHint")}</p><div className="connection-options"><button onClick={() => beginAdd("direct")}><span>⌁</span><b>{t("local")}</b><small>{t("localBrand")}</small></button><button onClick={() => beginAdd("cloud")}><span>☁</span><b>{t("cloud")}</b><small>{t("cloudBrand")}</small></button></div></section>}
     </>}
-    <footer><span className={`status-light ${active?.online === false ? "offline" : active?.online === undefined ? "checking" : ""}`} aria-hidden="true" />{message && !showAdd ? message : active ? `${active.brand} · ${busy ? t("sending") : active.online === false ? t("offline") : active.online === true ? t("connected") : t("checking")}` : t("localStorage")}</footer>
+    <footer title={!showAdd ? messageDetail || undefined : undefined}><span className={`status-light ${active?.online === false ? "offline" : active?.online === undefined ? "checking" : ""}`} aria-hidden="true" />{message && !showAdd ? message : active ? `${active.brand} · ${busy ? t("sending") : active.online === false ? t("offline") : active.online === true ? t("connected") : t("checking")}` : t("localStorage")}</footer>
   </main>;
 }
 

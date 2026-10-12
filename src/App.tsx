@@ -58,7 +58,10 @@ function App() {
 
   useEffect(() => { localStorage.setItem("klimat-profiles", JSON.stringify(profiles)); }, [profiles]);
   useEffect(() => { localStorage.setItem("klimat-devices", JSON.stringify(devices)); }, [devices]);
-  useEffect(() => { localStorage.setItem("klimat-language", language); }, [language]);
+  useEffect(() => {
+    localStorage.setItem("klimat-language", language);
+    void invoke("set_tray_language", { language });
+  }, [language]);
   useEffect(() => {
     let cancelled = false;
     const unlisten: Array<() => void> = [];

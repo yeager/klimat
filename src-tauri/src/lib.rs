@@ -360,6 +360,51 @@ fn hide_on_close(window: WebviewWindow) {
     let _ = window.hide();
 }
 
+fn tray_menu_labels(language: &str) -> (&'static str, &'static str, &'static str) {
+    match language.split(['-', '_']).next().unwrap_or("en") {
+        "sv" => ("Visa Klimat", "Om Klimat", "Avsluta"),
+        "de" => ("Klimat anzeigen", "Über Klimat", "Beenden"),
+        "fr" => ("Afficher Klimat", "À propos de Klimat", "Quitter"),
+        "es" => ("Mostrar Klimat", "Acerca de Klimat", "Salir"),
+        "it" => ("Mostra Klimat", "Informazioni su Klimat", "Esci"),
+        "pt" => ("Mostrar Klimat", "Sobre Klimat", "Sair"),
+        "nl" => ("Klimat tonen", "Over Klimat", "Afsluiten"),
+        "da" => ("Vis Klimat", "Om Klimat", "Afslut"),
+        "nb" => ("Vis Klimat", "Om Klimat", "Avslutt"),
+        "fi" => ("Näytä Klimat", "Tietoja Klimatista", "Lopeta"),
+        "pl" => ("Pokaż Klimat", "O Klimat", "Zakończ"),
+        "cs" => ("Zobrazit Klimat", "O aplikaci Klimat", "Ukončit"),
+        "sk" => ("Zobraziť Klimat", "O aplikácii Klimat", "Ukončiť"),
+        "hu" => ("Klimat megjelenítése", "Névjegy: Klimat", "Kilépés"),
+        "ro" => ("Afișează Klimat", "Despre Klimat", "Ieșire"),
+        "el" => ("Εμφάνιση Klimat", "Σχετικά με το Klimat", "Έξοδος"),
+        "tr" => ("Klimat’ı göster", "Klimat hakkında", "Çıkış"),
+        "ja" => ("Klimatを表示", "Klimatについて", "終了"),
+        "zh" => ("显示 Klimat", "关于 Klimat", "退出"),
+        _ => ("Show Klimat", "About Klimat", "Quit"),
+    }
+}
+
+fn build_tray_menu(
+    app: &tauri::AppHandle,
+    language: &str,
+) -> tauri::Result<Menu<tauri::Wry>> {
+    let (open_label, about_label, quit_label) = tray_menu_labels(language);
+    let open = MenuItem::with_id(app, "open", open_label, true, None::<&str>)?;
+    let about = MenuItem::with_id(app, "about", about_label, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    Menu::with_items(app, &[&open, &about, &separator, &quit])
+}
+
+#[tauri::command]
+fn set_tray_language(app: tauri::AppHandle, language: String) -> Result<(), String> {
+    let menu = build_tray_menu(&app, &language).map_err(|error| error.to_string())?;
+    let tray = app.tray_by_id("main").ok_or("Klimats trayikon saknas.")?;
+    tray.set_menu(Some(menu)).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn show_popup(window: &WebviewWindow, anchor: Option<(PhysicalPosition<f64>, Rect)>) {
     let monitor = match anchor {
         Some((position, _)) => window
@@ -430,7 +475,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             hide_on_close,
             climate_request,
-            about_info
+            about_info,
+            set_tray_language
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -451,13 +497,9 @@ pub fn run() {
             };
             let sidecar = app.path().resolve(sidecar_name, BaseDirectory::Resource)?;
             let _ = ADAPTER_BINARY.set(sidecar.is_file().then_some(sidecar));
-            let open = MenuItem::with_id(app, "open", "Visa Klimat", true, None::<&str>)?;
-            let about = MenuItem::with_id(app, "about", "Om Klimat", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Avsluta", true, None::<&str>)?;
-            let separator = PredefinedMenuItem::separator(app)?;
-            let menu = Menu::with_items(app, &[&open, &about, &separator, &quit])?;
+            let menu = build_tray_menu(app.handle(), "sv")?;
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
-            TrayIconBuilder::new()
+            TrayIconBuilder::with_id("main")
                 .icon(tray_icon)
                 .icon_as_template(cfg!(target_os = "macos"))
                 .menu(&menu)

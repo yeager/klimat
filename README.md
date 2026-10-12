@@ -30,7 +30,7 @@ The Mitsubishi local adapter is based on the MIT-licensed [pymitsubishi](https:/
 
 ## Download
 
-Download [Klimat 0.1.14](https://github.com/yeager/klimat/releases/tag/v0.1.14), the current early-access release. It includes:
+Download [Klimat 0.1.15](https://github.com/yeager/klimat/releases/tag/v0.1.15), the current early-access release. It includes:
 
 - Linux x64 `.deb` and `.rpm`
 - Intel Mac `.dmg` and Apple Silicon `.dmg`
@@ -53,7 +53,7 @@ Klimat starts hidden and opens a small popup from its tray icon. Clicking outsid
 
 ## Localization and icons
 
-The interface supports Swedish (`sv`), English (`en`), German (`de`), French (`fr`), Spanish (`es`), Italian (`it`), Portuguese (`pt`), Dutch (`nl`), Danish (`da`), Norwegian Bokmål (`nb`), Finnish (`fi`), Polish (`pl`), Czech (`cs`), Slovak (`sk`), Hungarian (`hu`), Romanian (`ro`), Greek (`el`), Turkish (`tr`), Japanese (`ja`), and Simplified Chinese (`zh`). The system language is selected on first launch; users can change it in the popup.
+The tray menu follows the selected language. The interface supports Swedish (`sv`), English (`en`), German (`de`), French (`fr`), Spanish (`es`), Italian (`it`), Portuguese (`pt`), Dutch (`nl`), Danish (`da`), Norwegian Bokmål (`nb`), Finnish (`fi`), Polish (`pl`), Czech (`cs`), Slovak (`sk`), Hungarian (`hu`), Romanian (`ro`), Greek (`el`), Turkish (`tr`), Japanese (`ja`), and Simplified Chinese (`zh`). The system language is selected on first launch; users can change it in the popup.
 
 Translations are in `src/i18n.ts`. Each locale uses the same message keys. Preserve placeholders and control meanings, and check the compact popup for text overflow when changing strings.
 

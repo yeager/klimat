@@ -317,13 +317,61 @@ async def melcloud_login(pymelcloud, session, username, password):
 
     try:
         token = await asyncio.wait_for(
-            pymelcloud.login(username, password, session=session), timeout=10
+            melcloud_classic_login(session, username, password), timeout=15
         )
+        if token is None:
+            # python-melcloud 0.1.3 still uses the legacy ClientLogin endpoint.
+            # Keep that path for MELCloud servers that do not expose ClientLogin3.
+            token = await asyncio.wait_for(
+                pymelcloud.login(username, password, session=session), timeout=10
+            )
     except (aiohttp.ClientError, TimeoutError, AttributeError, KeyError, TypeError) as error:
         raise melcloud_login_error(error) from error
     if not isinstance(token, str) or not token.strip():
         raise ValueError("MELCloud bekräftade inte inloggningen. Kontrollera e-postadress och lösenord i MELCloud-appen eller på webben.")
     return token
+
+
+async def melcloud_classic_login(session, username, password):
+    """Use the current MELCloud Classic login endpoint where available."""
+    import aiohttp
+
+    async with session.post(
+        "https://app.melcloud.com/Mitsubishi.Wifi.Client/Login/ClientLogin3",
+        json={
+            "AppVersion": "1.38.4.0",
+            "Email": username,
+            "Language": 0,
+            "Password": password,
+            "Persist": True,
+        },
+        headers={
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Cookie": "policyaccepted=true",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:73.0) Gecko/20100101 Firefox/73.0",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+    ) as response:
+        if response.status in {404, 405}:
+            return None
+        if response.status == 429:
+            raise ValueError("MELCloud begränsar tillfälligt inloggningar. Vänta innan du försöker igen.")
+        if response.status in {400, 401, 403}:
+            raise ValueError("MELCloud nekade inloggningen. Kontrollera e-postadress och lösenord i MELCloud-appen eller på webben.")
+        response.raise_for_status()
+        body = await response.json(content_type=None)
+
+    if not isinstance(body, dict):
+        raise ValueError("MELCloud svarade med ett oväntat inloggningssvar.")
+    login_data = body.get("LoginData")
+    if login_data is None:
+        if body.get("ErrorId") == 6:
+            minutes = body.get("LoginMinutes")
+            suffix = f" Försök igen om {int(minutes)} minuter." if isinstance(minutes, (int, float)) and minutes > 0 else " Vänta en stund och försök igen."
+            raise ValueError("MELCloud begränsar tillfälligt inloggningar." + suffix)
+        raise ValueError("MELCloud nekade inloggningen. Kontrollera e-postadress och lösenord i MELCloud-appen eller på webben.")
+    token = login_data.get("ContextKey") if isinstance(login_data, dict) else None
+    return token if isinstance(token, str) and token.strip() else None
 
 
 async def melcloud_connect(payload):

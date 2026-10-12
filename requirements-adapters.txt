@@ -7,3 +7,4 @@ pymitsubishi==0.6.1
 azure-iot-device==2.15.0rc1
 toshiba-ac-community==0.7.2
 greeclimate-davo22 @ git+https://github.com/davo22/greeclimate.git@2.3.0
+aio-panasonic-comfort-cloud==2026.8.9

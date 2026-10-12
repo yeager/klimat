@@ -12,6 +12,8 @@ Klimat is an early prototype. Two Mitsubishi MSZ-LN35VG2W units using the MAC-57
 | Mitsubishi Electric MELCloud Classic | Cloud | Email/password sign-in and power, setpoint, operating mode, and fan controls. |
 | Mitsubishi Electric MELCloud Home | Cloud | Separate service using the same account email/password and supported air-to-air controls. |
 | LG ThinQ | Cloud | Official ThinQ Connect API. Requires a Personal Access Token with air-conditioner access and the country where the LG account was created. |
+| Panasonic Comfort Cloud | Cloud | Panasonic account, with optional authenticator code when two-factor authentication is enabled. Standard air-conditioner units only; Aquarea heat pumps are not included. |
+| Samsung SmartThings | Cloud | SmartThings API token with device read and command execution scopes. New personal access tokens normally expire after 24 hours and must be replaced. |
 | Toshiba Lifestyle | Cloud | Toshiba account sign-in and cloud control through the Toshiba AC service. Device and account availability depends on region and Wi-Fi adapter. |
 | Gree | Cloud | Experimental account sign-in with regional selection and MQTT control. Needs confirmation with a real account and device. |
 | Midea and compatible Comfee/Toshiba Lifestyle units | Local network | Broadcast discovery or a manually entered IP address. Compatibility depends on the unit and Wi-Fi module. |
@@ -21,6 +23,8 @@ Klimat is an early prototype. Two Mitsubishi MSZ-LN35VG2W units using the MAC-57
 You can save up to six units. The popup offers power, target temperature, cool/heat/auto/dry/fan modes, and fan speed where the device supports them. It refreshes the selected unit while the popup is open and when it becomes visible again.
 
 MELCloud Classic and MELCloud Home are separate services; choose the one used by your unit. For LG, create a token at [LG ThinQ Connect](https://connect-pat.lgthinq.com), grant it access to air conditioners, and select the country where the LG account was registered. Toshiba Lifestyle Cloud uses the same account as the official Toshiba AC app. Gree Cloud requires the account region used by the Gree app. Credentials and tokens are kept in the operating system keychain. Do not share them in bug reports. Check that the account works in the matching official app or website before reporting a login issue.
+
+Panasonic uses the community-maintained [aio-panasonic-comfort-cloud](https://github.com/sockless-coding/aio-panasonic-comfort-cloud) client. Samsung support uses the SmartThings REST API and requires `r:devices` and `x:devices` access. Create a personal access token on the [SmartThings token page](https://account.smartthings.com/tokens). Current personal tokens usually last 24 hours, so Samsung setup is best for evaluation until Klimat can use a registered OAuth application.
 
 The Mitsubishi local adapter is based on the MIT-licensed [pymitsubishi](https://github.com/pymitsubishi/pymitsubishi) implementation. Klimat sends a status request without changing the adapter's MELCloud or ECHONET settings. Legacy ECHONET profiles remain readable, but the current setup flow uses the local HTTP API. The `MSZ-LN35VG2W` is also reported working over its CN105 service connector with an ESPHome-compatible adapter; that requires additional hardware, and Klimat does not control CN105 directly.
 
@@ -53,11 +57,11 @@ The interface supports Swedish (`sv`), English (`en`), German (`de`), French (`f
 
 Translations are in `src/i18n.ts`. Each locale uses the same message keys. Preserve placeholders and control meanings, and check the compact popup for text overflow when changing strings.
 
-The repository includes platform app icons, a separate tray icon, and generated SVG icons for providers. Linux desktop integration uses `se.klimakontroll.desktop`; macOS uses an `.icns` app icon; Windows uses an `.ico` icon.
+The repository includes platform app icons, a separate tray icon, and generated SVG icons for providers. The display name is Klimat on all platforms; the existing internal application identifier is retained so upgrades continue to use the same app data.
 
 ## Development
 
-Install Node.js, pnpm, Rust, Python 3, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your operating system. Python adapter packaging also needs the dependencies in `requirements-build.txt`.
+Install Node.js, pnpm, Rust, Python 3.10 or newer, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your operating system. Python adapter packaging also needs the dependencies in `requirements-build.txt`.
 
 ```sh
 pnpm install
@@ -73,7 +77,7 @@ pnpm build:adapter
 pnpm tauri build
 ```
 
-Build installers on their target operating system. The CI workflow builds the Linux, macOS, and Windows targets listed above. The bundled Python adapter includes clients for MELCloud Classic, MELCloud Home, Toshiba Lifestyle Cloud, Gree Cloud, LG ThinQ Connect, Mitsubishi MAC-577IF-2E, and Midea-compatible units; local Gree control uses the `gree-climate` Rust crate, and Daikin uses its local HTTP API directly.
+Build installers on their target operating system. The CI workflow builds the Linux, macOS, and Windows targets listed above. The bundled Python adapter includes clients for MELCloud Classic, MELCloud Home, Toshiba Lifestyle Cloud, Gree Cloud, LG ThinQ Connect, Panasonic Comfort Cloud, Samsung SmartThings, Mitsubishi MAC-577IF-2E, and Midea-compatible units; local Gree control uses the `gree-climate` Rust crate, and Daikin uses its local HTTP API directly.
 
 ## License and third-party notices
 

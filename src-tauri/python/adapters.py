@@ -2,6 +2,8 @@
 
 from urllib.parse import parse_qsl, unquote
 import asyncio
+import tempfile
+from pathlib import Path
 
 
 DAIKIN_MODES = {"0": "auto", "1": "auto", "2": "dry", "3": "cool", "4": "heat", "6": "fan", "7": "auto"}
@@ -71,6 +73,225 @@ def climate_device(device, brand, kind):
             if mode in {"auto", "cool", "heat", "dry", "fan"}
         ))
     return item
+
+
+def panasonic_device(info, device):
+    from aio_panasonic_comfort_cloud import constants
+
+    params = device.parameters
+    modes = {
+        constants.OperationMode.Auto: "auto",
+        constants.OperationMode.Cool: "cool",
+        constants.OperationMode.Heat: "heat",
+        constants.OperationMode.Dry: "dry",
+        constants.OperationMode.Fan: "fan",
+    }
+    fans = {
+        constants.FanSpeed.Auto: "auto",
+        constants.FanSpeed.Low: "low",
+        constants.FanSpeed.LowMid: "low",
+        constants.FanSpeed.Mid: "medium",
+        constants.FanSpeed.HighMid: "high",
+        constants.FanSpeed.High: "high",
+    }
+    mode = modes.get(params.mode, "auto")
+    features = device.features
+    available_modes = [
+        mode_id for enabled, mode_id in (
+            (features.auto_mode, "auto"),
+            (features.cool_mode, "cool"),
+            (features.heat_mode, "heat"),
+            (features.dry_mode, "dry"),
+            (features.fan_mode, "fan"),
+        ) if enabled
+    ]
+    return {
+        "id": str(info.id),
+        "name": info.name or "Panasonic AC",
+        "brand": "panasonic-cloud",
+        "kind": "cloud",
+        "state": "on" if params.power == constants.Power.On else "off",
+        "target": params.target_temperature or 22,
+        "temperatureStep": 0.5,
+        "minTarget": 16,
+        "maxTarget": 30,
+        "current": params.inside_temperature or 0,
+        "mode": mode,
+        "availableModes": available_modes or [mode],
+        "fan": fans.get(params.fan_speed, "auto"),
+    }
+
+
+async def panasonic_request(payload, action):
+    import aiohttp
+    from aio_panasonic_comfort_cloud import ApiClient, ChangeRequestBuilder, constants
+    from aio_panasonic_comfort_cloud.exceptions import MFARequiredError
+
+    profile = next((entry for entry in payload.get("profiles", []) if entry.get("id") == (payload.get("profileId") or payload.get("id"))), None)
+    credentials = profile or payload
+    username, password = credentials.get("username"), credentials.get("password")
+    if not username or not password:
+        raise ValueError("Panasonic Comfort Cloud-uppgifter saknas. Anslut kontot igen.")
+    token_path = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="klimat-panasonic-", delete=False) as token_file:
+            token_path = token_file.name
+            saved_token = credentials.get("panasonicToken")
+            if saved_token:
+                token_file.write(str(saved_token).encode("utf-8"))
+        async with aiohttp.ClientSession() as session:
+            client = ApiClient(username, password, session, token_file_name=token_path, auto_power_on=False)
+            try:
+                await client.start_session(otp_code=payload.get("otp") or None)
+            except MFARequiredError as error:
+                raise ValueError("Panasonic kräver en verifieringskod. Ange koden från tvåfaktorsappen och försök igen.") from error
+            infos = client.get_devices()
+            selected = requested_ids(payload)
+            limit = device_limit(payload)
+            if action in {"discover", "restore"}:
+                results = []
+                for info in infos:
+                    if selected is not None and str(info.id) not in selected:
+                        continue
+                    if action == "discover" and already_known(payload, "panasonic-cloud", info.id):
+                        continue
+                    if len(results) >= limit:
+                        break
+                    device = await client.get_device(info)
+                    item = panasonic_device(info, device)
+                    item["connection"] = {"profile_id": payload.get("id") or payload.get("profileId")}
+                    results.append(item)
+                return {"devices": results, "profile": {"panasonicToken": Path(token_path).read_text(encoding="utf-8")}}
+            info = next((item for item in infos if str(item.id) == str(payload["device"]["id"])), None)
+            if info is None:
+                raise ValueError("Panasonic-enheten hittades inte på Comfort Cloud-kontot.")
+            device = await client.get_device(info)
+            if action != "status":
+                builder = ChangeRequestBuilder(device)
+                value = payload.get("value")
+                if action == "power":
+                    builder.set_power_mode(constants.Power.On if value == "on" else constants.Power.Off)
+                elif action == "temperature":
+                    builder.set_target_temperature(max(16, min(30, float(value))))
+                elif action == "mode":
+                    modes = {"auto": constants.OperationMode.Auto, "cool": constants.OperationMode.Cool, "heat": constants.OperationMode.Heat, "dry": constants.OperationMode.Dry, "fan": constants.OperationMode.Fan}
+                    if str(value) not in modes:
+                        raise ValueError("Panasonic-enheten stöder inte det valda driftläget.")
+                    builder.set_hvac_mode(modes[str(value)])
+                elif action == "fan":
+                    fans = {"auto": constants.FanSpeed.Auto, "low": constants.FanSpeed.Low, "medium": constants.FanSpeed.Mid, "high": constants.FanSpeed.High}
+                    if str(value) not in fans:
+                        raise ValueError("Panasonic-enheten stöder inte den valda fläkthastigheten.")
+                    builder.set_fan_speed(fans[str(value)])
+                else:
+                    raise ValueError(f"Unsupported Panasonic command: {action}")
+                if builder.has_changes:
+                    await client.set_device_raw(device, builder.build())
+                    await client.try_update_device(device)
+            result = panasonic_device(info, device)
+            result["profile"] = {"panasonicToken": Path(token_path).read_text(encoding="utf-8")}
+            return result
+    finally:
+        if token_path:
+            Path(token_path).unlink(missing_ok=True)
+
+
+def smartthings_device(item):
+    component = next((entry for entry in item.get("components", []) if entry.get("id") == "main"), None)
+    if not component:
+        return None
+    capabilities = component.get("capabilities", [])
+    ids = {entry.get("id") for entry in capabilities}
+    required = {"airConditionerMode", "airConditionerFanMode", "switch", "temperatureMeasurement", "thermostatCoolingSetpoint"}
+    if not required.issubset(ids):
+        return None
+    status = item.get("status", {}).get("components", {}).get("main", {})
+    if not status:
+        component_status = next((entry for entry in item.get("components", []) if entry.get("id") == "main"), {})
+        status = {entry.get("id"): entry.get("status", {}) for entry in component_status.get("capabilities", [])}
+    def value(capability, attribute, default=None):
+        return status.get(capability, {}).get(attribute, {}).get("value", default)
+    mode_values = value("airConditionerMode", "supportedAcModes", []) or []
+    mode_map = {"auto": "auto", "aIComfort": "auto", "cool": "cool", "heat": "heat", "dry": "dry", "fanOnly": "fan", "fan": "fan", "wind": "fan"}
+    mode = mode_map.get(value("airConditionerMode", "airConditionerMode", "auto"), "auto")
+    available_modes = list(dict.fromkeys(mode_map[entry] for entry in mode_values if entry in mode_map)) or ["auto", "cool", "heat", "dry", "fan"]
+    fan_values = value("airConditionerFanMode", "supportedAcFanModes", []) or []
+    fan = str(value("airConditionerFanMode", "fanMode", "auto")).lower()
+    normalized_fan = "auto" if "auto" in fan else "low" if fan in {"low", "quiet", "silent"} else "high" if fan in {"high", "turbo", "max"} else "medium"
+    range_value = value("thermostatCoolingSetpoint", "coolingSetpointRange", {}) or {}
+    available_fans = list(dict.fromkeys("auto" if str(entry).lower() == "auto" else "low" if str(entry).lower() in {"low", "quiet", "silent"} else "high" if str(entry).lower() in {"high", "turbo", "max"} else "medium" for entry in fan_values))
+    return {
+        "id": str(item.get("deviceId", "")), "name": item.get("label") or item.get("name") or "Samsung AC",
+        "brand": "samsung-smartthings", "kind": "cloud",
+        "state": "on" if value("switch", "switch", "off") == "on" else "off",
+        "target": value("thermostatCoolingSetpoint", "coolingSetpoint", 22),
+        "temperatureStep": range_value.get("step", 1),
+        "minTarget": range_value.get("minimum", 16), "maxTarget": range_value.get("maximum", 30),
+        "current": value("temperatureMeasurement", "temperature", 0), "mode": mode,
+        "availableModes": available_modes, "fan": normalized_fan, "availableFans": available_fans or ["auto", "low", "medium", "high"],
+    }
+
+
+async def samsung_request(payload, action):
+    import aiohttp
+
+    profile = next((entry for entry in payload.get("profiles", []) if entry.get("id") == (payload.get("profileId") or payload.get("id"))), None)
+    token = (profile or payload).get("token")
+    if not token:
+        raise ValueError("Samsung SmartThings-token saknas i systemets nyckelring. Anslut kontot igen.")
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json"}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async def devices():
+            async with session.get("https://api.smartthings.com/v1/devices", params={"capability": "airConditionerMode", "includeStatus": "true"}) as response:
+                if response.status in {401, 403}:
+                    raise ValueError("Samsung SmartThings-tokenet har upphört eller saknar behörighet. Skapa ett nytt token och anslut igen.")
+                response.raise_for_status()
+                return (await response.json()).get("items", [])
+        items = await devices()
+        selected = requested_ids(payload)
+        limit = device_limit(payload)
+        if action in {"discover", "restore"}:
+            results = []
+            for item in items:
+                device = smartthings_device(item)
+                if not device or selected is not None and device["id"] not in selected:
+                    continue
+                if action == "discover" and already_known(payload, "samsung-smartthings", device["id"]):
+                    continue
+                if len(results) >= limit:
+                    break
+                results.append(device)
+            return {"devices": results, "profile": {}}
+        item = next((item for item in items if str(item.get("deviceId")) == str(payload["device"]["id"])), None)
+        device = smartthings_device(item) if item else None
+        if not device:
+            raise ValueError("Samsung-klimatet hittades inte eller exponerar inte SmartThings klimatfunktioner.")
+        if action != "status":
+            value = payload.get("value")
+            if action == "power":
+                command = {"component": "main", "capability": "switch", "command": "on" if value == "on" else "off"}
+            elif action == "temperature":
+                command = {"component": "main", "capability": "thermostatCoolingSetpoint", "command": "setCoolingSetpoint", "arguments": [float(value)]}
+            elif action == "mode":
+                modes = {"auto": "auto", "cool": "cool", "heat": "heat", "dry": "dry", "fan": "fanOnly"}
+                if value not in modes:
+                    raise ValueError("Samsung-enheten stöder inte det valda driftläget.")
+                command = {"component": "main", "capability": "airConditionerMode", "command": "setAirConditionerMode", "arguments": [modes[value]]}
+            elif action == "fan":
+                fan = {"auto": "auto", "low": "low", "medium": "medium", "high": "high"}.get(str(value))
+                if fan not in device["availableFans"]:
+                    raise ValueError("Samsung-enheten stöder inte den valda fläkthastigheten.")
+                command = {"component": "main", "capability": "airConditionerFanMode", "command": "setFanMode", "arguments": [fan]}
+            else:
+                raise ValueError(f"Unsupported Samsung SmartThings command: {action}")
+            async with session.post(f"https://api.smartthings.com/v1/devices/{device['id']}/commands", json={"commands": [command]}) as response:
+                if response.status in {401, 403}:
+                    raise ValueError("Samsung SmartThings-tokenet har upphört eller saknar behörighet. Skapa ett nytt token och anslut igen.")
+                response.raise_for_status()
+            items = await devices()
+            item = next((item for item in items if str(item.get("deviceId")) == device["id"]), item)
+            device = smartthings_device(item) or device
+        return device
 
 
 def melcloud_login_error(error):
@@ -1190,6 +1411,10 @@ async def handle(payload):
         return await gree_cloud_request(payload, action)
     if action == "status" and brand == "lg-thinq":
         return await thinq_request(payload, action)
+    if action == "status" and brand == "panasonic-cloud":
+        return await panasonic_request(payload, action)
+    if action == "status" and brand == "samsung-smartthings":
+        return await samsung_request(payload, action)
     if action == "status" and brand == "daikin":
         return await daikin_status(payload)
     if action == "discover":
@@ -1205,6 +1430,10 @@ async def handle(payload):
             return await gree_cloud_request(payload, action)
         if brand == "lg-thinq":
             return await thinq_request(payload, action)
+        if brand == "panasonic-cloud":
+            return await panasonic_request(payload, action)
+        if brand == "samsung-smartthings":
+            return await samsung_request(payload, action)
         if brand == "daikin":
             return await daikin_connect(payload)
         if brand in MIDEA_BRANDS:
@@ -1223,6 +1452,10 @@ async def handle(payload):
             return await gree_cloud_request(payload, action)
         if brand == "lg-thinq":
             return await thinq_request(payload, action)
+        if brand == "panasonic-cloud":
+            return await panasonic_request(payload, action)
+        if brand == "samsung-smartthings":
+            return await samsung_request(payload, action)
         if brand == "daikin":
             return await daikin_restore(payload)
         if brand in MIDEA_BRANDS:
@@ -1238,6 +1471,10 @@ async def handle(payload):
         return await gree_cloud_request(payload, action)
     if brand == "lg-thinq":
         return await thinq_request(payload, action)
+    if brand == "panasonic-cloud":
+        return await panasonic_request(payload, action)
+    if brand == "samsung-smartthings":
+        return await samsung_request(payload, action)
     if brand == "daikin":
         return await daikin_command(payload)
     if brand in MIDEA_BRANDS:

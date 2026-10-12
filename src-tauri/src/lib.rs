@@ -275,6 +275,44 @@ fn climate_request_blocking(payload: Value) -> Result<Value, String> {
     }
     let mut response: Value = serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("Ogiltigt svar från adapterbryggan: {error}"))?;
+    let active_profile = payload
+        .get("profileId")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("id").and_then(Value::as_str));
+    let panasonic_token = response
+        .get("profile")
+        .and_then(|value| value.get("panasonicToken"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if let (Some(profile_id), Some(token)) = (active_profile, panasonic_token) {
+        let mut secrets = SECRET_PROFILES
+            .get_or_init(Default::default)
+            .lock()
+            .map_err(|e| e.to_string())?;
+        let mut secret = secrets
+            .get(profile_id)
+            .cloned()
+            .or_else(|| {
+                keyring::Entry::new("Klimat", profile_id)
+                    .ok()?
+                    .get_password()
+                    .ok()
+                    .and_then(|text| serde_json::from_str(&text).ok())
+            })
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let Some(object) = secret.as_object_mut() {
+            object.insert("panasonicToken".into(), Value::String(token));
+        }
+        keyring::Entry::new("Klimat", profile_id)
+            .and_then(|entry| entry.set_password(&secret.to_string()))
+            .map_err(|error| {
+                format!("Kunde inte spara Panasonic-sessionen i systemets nyckelring: {error}")
+            })?;
+        secrets.insert(profile_id.to_string(), secret);
+        if let Some(profile) = response.get_mut("profile").and_then(Value::as_object_mut) {
+            profile.remove("panasonicToken");
+        }
+    }
     if payload.get("action").and_then(Value::as_str) == Some("discover") {
         if let Some(profile_id) = payload.get("id").and_then(Value::as_str) {
             if let Some(secret) = SECRET_PROFILES
@@ -379,7 +417,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![hide_on_close, climate_request, about_info])
+        .invoke_handler(tauri::generate_handler![
+            hide_on_close,
+            climate_request,
+            about_info
+        ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             set_macos_tray_activation_policy();
@@ -399,7 +441,7 @@ pub fn run() {
             };
             let sidecar = app.path().resolve(sidecar_name, BaseDirectory::Resource)?;
             let _ = ADAPTER_BINARY.set(sidecar.is_file().then_some(sidecar));
-            let open = MenuItem::with_id(app, "open", "Visa klimatkontroller", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Visa Klimat", true, None::<&str>)?;
             let about = MenuItem::with_id(app, "about", "Om Klimat", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Avsluta", true, None::<&str>)?;
             let separator = PredefinedMenuItem::separator(app)?;

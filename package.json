@@ -2,14 +2,14 @@
   "name": "klimat-tray",
   "private": true,
   "license": "GPL-3.0-only",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "setup:adapters": "python3 -m pip install --user -r requirements-adapters.txt",
-    "build:adapter": "python3 src-tauri/python/collect_licenses.py && python3 -m PyInstaller --clean --noconfirm --onefile --collect-submodules midealocal --collect-submodules pymelcloud --collect-submodules aiomelcloudhome --collect-submodules thinqconnect --collect-submodules pymitsubishi --collect-submodules toshiba_ac --collect-submodules azure.iot.device --collect-submodules greeclimate_davo22 --collect-submodules aiomqtt --name klimat-adapter --distpath src-tauri/python/dist src-tauri/python/adapter_cli.py",
+    "build:adapter": "python3 src-tauri/python/collect_licenses.py && python3 -m PyInstaller --clean --noconfirm --onefile --collect-submodules midealocal --collect-submodules pymelcloud --collect-submodules aiomelcloudhome --collect-submodules thinqconnect --collect-submodules pymitsubishi --collect-submodules toshiba_ac --collect-submodules azure.iot.device --collect-submodules greeclimate_davo22 --collect-submodules aio_panasonic_comfort_cloud --collect-submodules aiomqtt --name klimat-adapter --distpath src-tauri/python/dist src-tauri/python/adapter_cli.py",
     "tauri": "tauri"
   },
   "dependencies": {

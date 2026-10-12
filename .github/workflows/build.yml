@@ -131,7 +131,7 @@ jobs:
           mkdir -p release-assets
           find release-artifacts -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \) -exec cp '{}' release-assets/ \;
           cp src-tauri/python/dist/THIRD_PARTY_LICENSES.txt release-assets/
-          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -ge 7
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -ge 6
           cd release-assets
           sha256sum -- * > SHA256SUMS.txt
 

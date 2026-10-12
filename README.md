@@ -30,7 +30,7 @@ The Mitsubishi local adapter is based on the MIT-licensed [pymitsubishi](https:/
 
 ## Download
 
-Download [Klimat 0.1.10](https://github.com/yeager/klimat/releases/tag/v0.1.10), the current early-access release. It includes:
+Download [Klimat 0.1.11](https://github.com/yeager/klimat/releases/tag/v0.1.11), the current early-access release. It includes:
 
 - Linux x64 `.deb` and `.rpm`
 - Intel Mac `.dmg` and Apple Silicon `.dmg`

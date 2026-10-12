@@ -3751,6 +3751,8 @@ version = "0.1.10"
 dependencies = [
  "gree-climate",
  "keyring",
+ "objc2",
+ "objc2-app-kit",
  "serde",
  "serde_json",
  "tauri",

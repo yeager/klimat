@@ -31,6 +31,10 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "linux-
 gree-climate = "0.1"
 tokio = { version = "1", features = ["net", "rt", "time"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", default-features = false, features = ["std"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSRunningApplication"] }
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

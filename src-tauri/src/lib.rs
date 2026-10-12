@@ -19,6 +19,17 @@ static SECRET_PROFILES: OnceLock<Mutex<HashMap<String, Value>>> = OnceLock::new(
 static ADAPTER_DIR: OnceLock<PathBuf> = OnceLock::new();
 static ADAPTER_BINARY: OnceLock<Option<PathBuf>> = OnceLock::new();
 
+#[cfg(target_os = "macos")]
+fn set_macos_tray_activation_policy() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+
+    if let Some(main_thread) = MainThreadMarker::new() {
+        let _ = NSApplication::sharedApplication(main_thread)
+            .setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    }
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AboutInfo {
@@ -370,6 +381,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![hide_on_close, climate_request, about_info])
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            set_macos_tray_activation_policy();
+
             let resource_dir = app.path().resolve("python", BaseDirectory::Resource)?;
             let adapter_file = resource_dir.join("adapters.py");
             let resolved_adapter_dir = if adapter_file.is_file() {

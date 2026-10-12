@@ -2063,7 +2063,7 @@ dependencies = [
 
 [[package]]
 name = "klimat"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "gree-climate",
  "keyring",

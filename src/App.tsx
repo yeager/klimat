@@ -161,7 +161,7 @@ function App() {
       const knownIds = new Set(devices.map(deviceKey));
       const newDevices = response.devices.map((device) => ({ ...device, online: true, brand: brandId, profileId: next.id, connection: { ...device.connection, profileId: next.id } })).filter((device) => !knownIds.has(deviceKey(device))).slice(0, Math.max(0, MAX_DEVICES - deviceCount));
       const savedProfile: Profile = { id: next.id, kind: category, brand: brandId, label: chosenBrand.name, endpoint: next.endpoint, region: next.region };
-      if (newDevices.length || !devices.length) setProfiles((current) => [...current, savedProfile]);
+      if (newDevices.length) setProfiles((current) => [...current, savedProfile]);
       if (response.devices.length > newDevices.length && deviceCount + newDevices.length >= MAX_DEVICES) setMessage(t("deviceLimit"));
       if (newDevices.length) { setDevices((current) => [...current, ...newDevices]); setSelected(deviceKey(newDevices[0])); setShowAdd(false); setMessage(`${newDevices.length} ${t("found")}`); }
       else setMessage(t("savedDiscovery"));

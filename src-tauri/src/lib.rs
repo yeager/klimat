@@ -156,19 +156,6 @@ fn climate_request_blocking(payload: Value) -> Result<Value, String> {
         .and_then(Value::as_str)
         .map(str::to_string);
     let mut safe_payload = payload.clone();
-    if let (Some(profile_id), Some(kind)) = (
-        profile_id.clone(),
-        payload.get("action").and_then(Value::as_str),
-    ) {
-        if kind == "discover" {
-            let secret = serde_json::json!({"username": payload.get("username"), "password": payload.get("password"), "token": payload.get("token"), "key": payload.get("key")});
-            let mut secrets = SECRET_PROFILES
-                .get_or_init(Default::default)
-                .lock()
-                .map_err(|e| e.to_string())?;
-            secrets.insert(profile_id.clone(), secret);
-        }
-    }
     if let Some(object) = safe_payload.as_object_mut() {
         let mut all = profiles.as_array().cloned().unwrap_or_default();
         let active = payload
@@ -214,26 +201,6 @@ fn climate_request_blocking(payload: Value) -> Result<Value, String> {
                 }
             }
         }
-        if payload.get("action").and_then(Value::as_str) == Some("discover") {
-            if let Some(profile_id) = payload.get("id").and_then(Value::as_str) {
-                if let Some(secret) = SECRET_PROFILES
-                    .get_or_init(Default::default)
-                    .lock()
-                    .map_err(|e| e.to_string())?
-                    .get(profile_id)
-                {
-                    if let Some(secret_map) = secret.as_object() {
-                        for (key, value) in secret_map {
-                            if let Some(value) = value.as_str() {
-                                if !value.is_empty() {
-                                    object.insert(key.clone(), Value::String(value.to_string()));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
         object.insert("profiles".into(), Value::Array(all));
     }
     let mut command = if let Some(binary) = ADAPTER_BINARY.get().and_then(|path| path.as_ref()) {
@@ -273,9 +240,16 @@ fn climate_request_blocking(payload: Value) -> Result<Value, String> {
     let mut response: Value = serde_json::from_slice(&output.stdout).map_err(|error| {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !output.status.success() {
-            format!("Adapterbryggan avslutades med {}: {}", output.status, stderr.trim())
+            format!(
+                "Adapterbryggan avslutades med {}: {}",
+                output.status,
+                stderr.trim()
+            )
         } else {
-            format!("Ogiltigt svar från adapterbryggan: {error}. {}", stderr.trim())
+            format!(
+                "Ogiltigt svar från adapterbryggan: {error}. {}",
+                stderr.trim()
+            )
         }
     })?;
     if !output.status.success() {
@@ -285,6 +259,11 @@ fn climate_request_blocking(payload: Value) -> Result<Value, String> {
             .map(str::to_owned)
             .unwrap_or_else(|| String::from_utf8_lossy(&output.stderr).trim().to_string()));
     }
+    let has_discovered_devices = response
+        .get("devices")
+        .and_then(Value::as_array)
+        .is_some_and(|devices| !devices.is_empty());
+    let is_discovery = payload.get("action").and_then(Value::as_str) == Some("discover");
     let active_profile = payload
         .get("profileId")
         .and_then(Value::as_str)
@@ -294,7 +273,11 @@ fn climate_request_blocking(payload: Value) -> Result<Value, String> {
         .and_then(|value| value.get("panasonicToken"))
         .and_then(Value::as_str)
         .map(str::to_string);
-    if let (Some(profile_id), Some(token)) = (active_profile, panasonic_token) {
+    let should_store_panasonic_token = !is_discovery || has_discovered_devices;
+    if let (Some(profile_id), Some(token)) = (
+        active_profile.filter(|_| should_store_panasonic_token),
+        panasonic_token,
+    ) {
         let mut secrets = SECRET_PROFILES
             .get_or_init(Default::default)
             .lock()
@@ -309,7 +292,18 @@ fn climate_request_blocking(payload: Value) -> Result<Value, String> {
                     .ok()
                     .and_then(|text| serde_json::from_str(&text).ok())
             })
-            .unwrap_or_else(|| serde_json::json!({}));
+            .unwrap_or_else(|| {
+                if is_discovery && has_discovered_devices {
+                    serde_json::json!({
+                        "username": payload.get("username"),
+                        "password": payload.get("password"),
+                        "token": payload.get("token"),
+                        "key": payload.get("key"),
+                    })
+                } else {
+                    serde_json::json!({})
+                }
+            });
         if let Some(object) = secret.as_object_mut() {
             object.insert("panasonicToken".into(), Value::String(token));
         }
@@ -319,20 +313,34 @@ fn climate_request_blocking(payload: Value) -> Result<Value, String> {
                 format!("Kunde inte spara Panasonic-sessionen i systemets nyckelring: {error}")
             })?;
         secrets.insert(profile_id.to_string(), secret);
-        if let Some(profile) = response.get_mut("profile").and_then(Value::as_object_mut) {
-            profile.remove("panasonicToken");
-        }
     }
-    if payload.get("action").and_then(Value::as_str) == Some("discover") {
+    if let Some(profile) = response.get_mut("profile").and_then(Value::as_object_mut) {
+        profile.remove("panasonicToken");
+    }
+    if is_discovery && has_discovered_devices {
         if let Some(profile_id) = payload.get("id").and_then(Value::as_str) {
-            if let Some(secret) = SECRET_PROFILES
+            let secret = SECRET_PROFILES
                 .get_or_init(Default::default)
                 .lock()
                 .map_err(|e| e.to_string())?
                 .get(profile_id)
-            {
-                keyring::Entry::new("Klimat", profile_id).and_then(|entry| entry.set_password(&secret.to_string())).map_err(|error| format!("Anslutningen lyckades men uppgifterna kunde inte sparas i systemets nyckelring: {error}"))?;
-            }
+                .cloned()
+                .unwrap_or_else(|| {
+                    serde_json::json!({
+                        "username": payload.get("username"),
+                        "password": payload.get("password"),
+                        "token": payload.get("token"),
+                        "key": payload.get("key"),
+                    })
+                });
+            keyring::Entry::new("Klimat", profile_id)
+                .and_then(|entry| entry.set_password(&secret.to_string()))
+                .map_err(|error| format!("Anslutningen lyckades men uppgifterna kunde inte sparas i systemets nyckelring: {error}"))?;
+            SECRET_PROFILES
+                .get_or_init(Default::default)
+                .lock()
+                .map_err(|error| error.to_string())?
+                .insert(profile_id.to_owned(), secret);
             if let Some(devices) = response
                 .get("profile")
                 .and_then(|value| value.get("mideaDevices"))
@@ -351,6 +359,17 @@ fn climate_request_blocking(payload: Value) -> Result<Value, String> {
                 }
             }
         }
+    } else if is_discovery {
+        if let Some(profile_id) = profile_id {
+            SECRET_PROFILES
+                .get_or_init(Default::default)
+                .lock()
+                .map_err(|error| error.to_string())?
+                .remove(&profile_id);
+        }
+    }
+    if let Some(profile) = response.get_mut("profile").and_then(Value::as_object_mut) {
+        profile.remove("mideaDevices");
     }
     Ok(response)
 }
@@ -385,10 +404,7 @@ fn tray_menu_labels(language: &str) -> (&'static str, &'static str, &'static str
     }
 }
 
-fn build_tray_menu(
-    app: &tauri::AppHandle,
-    language: &str,
-) -> tauri::Result<Menu<tauri::Wry>> {
+fn build_tray_menu(app: &tauri::AppHandle, language: &str) -> tauri::Result<Menu<tauri::Wry>> {
     let (open_label, about_label, quit_label) = tray_menu_labels(language);
     let open = MenuItem::with_id(app, "open", open_label, true, None::<&str>)?;
     let about = MenuItem::with_id(app, "about", about_label, true, None::<&str>)?;
@@ -401,7 +417,8 @@ fn build_tray_menu(
 fn set_tray_language(app: tauri::AppHandle, language: String) -> Result<(), String> {
     let menu = build_tray_menu(&app, &language).map_err(|error| error.to_string())?;
     let tray = app.tray_by_id("main").ok_or("Klimats trayikon saknas.")?;
-    tray.set_menu(Some(menu)).map_err(|error| error.to_string())?;
+    tray.set_menu(Some(menu))
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 

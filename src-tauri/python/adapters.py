@@ -825,7 +825,9 @@ async def gree_cloud_request(payload, action):
             raise ConnectionError(f"Gree-enheten {info.name or info.mac} svarade inte på statusförfrågan.")
 
         value = payload.get("value")
-        if action == "power":
+        if action == "status":
+            pass
+        elif action == "power":
             device.power = value == "on"
         elif action == "temperature":
             target = float(value)

@@ -15,7 +15,7 @@ Klimat is an early-access application. Two Mitsubishi MSZ-LN35VG2W units using t
 | Panasonic Comfort Cloud | Cloud | Panasonic account, with optional authenticator code when two-factor authentication is enabled. Standard air-conditioner units only; Aquarea heat pumps are not included. |
 | Samsung SmartThings | Cloud | SmartThings API token with device read and command execution scopes. New personal access tokens normally expire after 24 hours and must be replaced. |
 | Toshiba Lifestyle | Cloud | Toshiba account sign-in and cloud control through the Toshiba AC service. Device and account availability depends on region and Wi-Fi adapter. |
-| Gree | Cloud | Experimental account sign-in with regional selection and MQTT control. Needs confirmation with a real account and device. |
+| Gree | Cloud | Experimental account sign-in with regional selection and MQTT control. Device status and commands still need verification with a real account and device. |
 | Midea and compatible Comfee/Toshiba Lifestyle units | Local network | Broadcast discovery or a manually entered IP address. Compatibility depends on the unit and Wi-Fi module. |
 | Gree | Local network | Automatic discovery and pairing for supported units. |
 | Daikin | Local network | Manual IP address for adapters exposing the compatible, older local HTTP API. Cloud-only and newer authenticated adapters are not covered. |
@@ -30,7 +30,7 @@ The Mitsubishi local adapter is based on the MIT-licensed [pymitsubishi](https:/
 
 ## Download
 
-Download [Klimat 0.1.12](https://github.com/yeager/klimat/releases/tag/v0.1.12), the current early-access release. It includes:
+Download [Klimat 0.1.14](https://github.com/yeager/klimat/releases/tag/v0.1.14), the current early-access release. It includes:
 
 - Linux x64 `.deb` and `.rpm`
 - Intel Mac `.dmg` and Apple Silicon `.dmg`
